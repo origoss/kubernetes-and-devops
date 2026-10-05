@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Containers</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Containerization · about 10 minutes · read before the session</p>
+<h1>Why containers?</h1>
+
+<div class="win">
+  <strong>Your win:</strong> you can say in one sentence what a container is, and you have run two Python versions side by side without installing either.
+</div>
+
+<p class="meta">Before this: the pre-flight check passed, so <code>docker run hello-world</code> works on your laptop.</p>
+
+<h2>The problem</h2>
+
+<p>Your server needs Python&nbsp;3.13. Your classmate's needs 3.12. The production machine has 3.11 and a library version neither of you tested. "Works on my machine" is not a joke. It is what happens when a program depends on whatever happens to be installed around it.</p>
+
+<p>A container solves this by shipping the program <em>together with</em> everything it expects to find: the runtime, the libraries, the files. That bundle runs the same on your laptop, a classmate's laptop and a cluster.<sup class="cite"><a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">[1]</a></sup></p>
+
+<h2>What a container really is</h2>
+
+<p>A container is <strong>an ordinary process on a Linux machine</strong>, which the kernel fences in two ways:</p>
+
+<ul>
+  <li><strong>Namespaces</strong> control what the process can <em>see</em>: its own process list, its own network, its own filesystem, its own hostname.<sup class="cite"><a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">[2]</a></sup></li>
+  <li><strong>cgroups</strong> control how much it can <em>use</em>: memory, CPU. Go over the memory limit and the kernel kills the process. You will meet this again in the fault hunt.<sup class="cite"><a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">[3]</a></sup></li>
+</ul>
+
+<p>There is no little computer inside. That is the key difference from a virtual machine.</p>
+
+<figure>
+<svg viewBox="0 0 640 250" role="img" aria-labelledby="vmct" style="width:100%;height:auto;font-family:var(--mono);font-size:13px">
+  <title id="vmct">A virtual machine runs a whole guest OS with its own kernel on a hypervisor; containers are processes sharing one host kernel.</title>
+  <g fill="none" stroke="currentColor" stroke-width="1.2">
+    <!-- VM side -->
+    <rect x="10" y="10" width="140" height="40" rx="3"/><rect x="170" y="10" width="140" height="40" rx="3"/>
+    <rect x="10" y="55" width="140" height="40" rx="3" stroke-dasharray="4 3"/><rect x="170" y="55" width="140" height="40" rx="3" stroke-dasharray="4 3"/>
+    <rect x="10" y="100" width="300" height="40" rx="3"/>
+    <rect x="10" y="145" width="300" height="40" rx="3"/>
+    <!-- container side -->
+    <rect x="340" y="10" width="90" height="40" rx="3"/><rect x="440" y="10" width="90" height="40" rx="3"/><rect x="540" y="10" width="90" height="40" rx="3"/>
+    <rect x="340" y="100" width="290" height="40" rx="3"/>
+    <rect x="340" y="145" width="290" height="40" rx="3"/>
+  </g>
+  <g fill="currentColor" text-anchor="middle">
+    <text x="80" y="35">app + libs</text><text x="240" y="35">app + libs</text>
+    <text x="80" y="80">guest OS+kernel</text><text x="240" y="80">guest OS+kernel</text>
+    <text x="160" y="125">hypervisor</text>
+    <text x="160" y="170">host kernel + hardware</text>
+    <text x="385" y="35">app+libs</text><text x="485" y="35">app+libs</text><text x="585" y="35">app+libs</text>
+    <text x="485" y="80" fill="var(--accent)">namespaces · cgroups</text>
+    <text x="485" y="125">container runtime</text>
+    <text x="485" y="170">host kernel + hardware</text>
+    <text x="160" y="215" font-weight="600">Virtual machines</text>
+    <text x="485" y="215" font-weight="600">Containers</text>
+    <text x="160" y="235" fill="var(--muted)">GBs · boot in tens of seconds</text>
+    <text x="485" y="235" fill="var(--muted)">MBs · start in well under a second</text>
+  </g>
+</svg>
+</figure>
+
+<p class="note"><strong>On a Mac or Windows laptop?</strong> Containers need a <em>Linux</em> kernel, so Docker quietly runs a small Linux VM and your containers share <em>its</em> kernel. Check it yourself in step 4 below.</p>
+
+<h2>Images and containers</h2>
+
+<p>You already know this from programming: an <strong>image</strong> is the <em>class</em>, a <strong>container</strong> is an <em>object</em>. The image is a read-only package: files plus a note on what to run.<sup class="cite"><a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">[4]</a></sup> Every <code>docker run</code> creates a new container from it, each with its own process and its own scratch space. Images live in a <strong>registry</strong>; Docker Hub is the default one, and in lesson 05 you push to your own on GitHub.</p>
+
+<p>Images follow an open standard, the OCI image format.<sup class="cite"><a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">[5]</a></sup> That is why an image you build with Docker runs unchanged in Kubernetes, which does not use Docker at all.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Run two Python versions, one after the other. Nothing gets installed on your laptop.</p>
+<pre class="cmd">docker run --rm python:3.12-slim python --version</pre>
+<pre class="cmd">docker run --rm python:3.13-slim python --version</pre>
+  <details class="expect"><summary>Expected output (the first run downloads ~200 MB)</summary>
+<pre>Python 3.12.15
+Python 3.13.16</pre>
+  </details>
+  <p class="note"><code>--rm</code> deletes the container when it exits. The <em>image</em> stays, so the second run of each is instant.</p>
+</li>
+
+<li>
+  <p>List the images you now have, the "classes":</p>
+<pre class="cmd">docker images python</pre>
+</li>
+
+<li>
+  <p>Look at the process list from <em>inside</em> a container:</p>
+<pre class="cmd">docker run --rm alpine ps</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>PID   USER     TIME  COMMAND
+    1 root      0:00 ps</pre>
+  </details>
+  <p>Your laptop runs hundreds of processes, but the container sees exactly one: itself, as PID&nbsp;1. That is a namespace at work.</p>
+</li>
+
+<li>
+  <p>Compare kernels, inside and outside:</p>
+<pre class="cmd">uname -r</pre>
+<pre class="cmd">docker run --rm alpine uname -r</pre>
+  <p>On Linux both lines match: one shared kernel. On a Mac or Windows the container reports a Linux kernel (something like <code>6.10.14-linuxkit</code>), which belongs to Docker's hidden VM.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>What is a container, really?</legend>
+  <button class="opt" data-why="Right. A process, fenced in by namespaces (what it sees) and cgroups (what it uses).">An ordinary process the kernel isolates and limits</button>
+  <button class="opt" data-why="No. That describes a VM. A container has no kernel of its own.">A small virtual machine with its own kernel</button>
+  <button class="opt" data-why="No. That is closer to an image. A container is the running thing.">A compressed archive Docker unpacks on every run</button>
+  <button class="opt" data-why="No. Any Linux program runs in a container unchanged. python here is the normal Python.">A program compiled specially to run inside Docker</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>You run <code>docker run python:3.13-slim</code> three times. What exists afterwards (without <code>--rm</code>)?</legend>
+  <button class="opt" data-why="Right. Class and objects: one image, three instances.">One image, three containers, each with its own process</button>
+  <button class="opt" data-why="No. The image is downloaded once and reused. Every run makes a new container.">Three images, one container that the three runs share</button>
+  <button class="opt" data-why="No. Images are not copied per run. That is the point of a read-only image.">Three images and three containers, one pair per run</button>
+  <button class="opt" data-why="No. docker run always creates a new container. Restarting an old one is docker start.">One image and one container, restarted three separate times</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span><code>docker run --rm alpine ps</code> lists only <code>ps</code>, as PID 1. Why?</legend>
+  <button class="opt" data-why="Right. The PID namespace gives the container its own process tree, starting at 1.">The PID namespace gives the container its own numbering</button>
+  <button class="opt" data-why="No. Alpine is just files. Numbering comes from the kernel.">Alpine Linux always starts every program as PID 1</button>
+  <button class="opt" data-why="No. Your laptop's processes keep running. The container simply cannot see them.">Docker kills every other process on the host first</button>
+  <button class="opt" data-why="No. ps would list processes it can see even without permission to read them. These simply are not in its namespace.">ps hides processes it is not allowed to read</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>On a Mac, what does <code>docker run --rm alpine uname -r</code> print?</legend>
+  <button class="opt" data-why="Tempting, but macOS has no Linux kernel to share. Containers need Linux.">The macOS kernel version, because containers share the host kernel</button>
+  <button class="opt" data-why="Right. Docker on a Mac runs a small Linux VM, and its kernel is the one your containers share.">A Linux kernel version, from the VM Docker runs in</button>
+  <button class="opt" data-why="No. Images contain no kernel. That is exactly what makes them small.">Alpine's own kernel version, which is shipped inside the image</button>
+  <button class="opt" data-why="No. You just ran Linux commands in step 1. The hidden VM makes that work.">Nothing at all, since containers on macOS cannot run Linux</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>Which mechanism stops one container from eating all of the machine's memory?</legend>
+  <button class="opt" data-why="No. Namespaces decide what is visible, not how much is used.">namespaces, which control which things it can see</button>
+  <button class="opt" data-why="No. An image holds files. Limits are set when the container runs.">the image, which declares its maximum memory size</button>
+  <button class="opt" data-why="Right. cgroups enforce the limit. Cross it and the kernel kills the process, which is what OOMKilled means.">cgroups, which limit how much it may use</button>
+  <button class="opt" data-why="No. Docker only asks the kernel to set the limit. The kernel enforces it.">Docker, which kills containers that look too greedy</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">Docker: What is a container?</a> (5 minutes, with a short video).<br>
+  <strong>If you are curious:</strong> <a href="https://www.youtube.com/watch?v=8fi7uSYlOdc">Liz Rice, "Containers From Scratch"</a> (35 min). She builds a container live in Go from namespaces and cgroups, and afterwards containers stop feeling like magic.
+</div>
+
+<p class="ask">Something unclear? Ask your instructor, or ask in the course channel. Bring your questions to the session.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-a-container/">Docker: What is a container?</a> ·
+[2] <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">namespaces(7)</a> ·
+[3] <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">cgroups(7)</a> ·
+[4] <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">Docker: What is an image?</a> ·
+[5] <a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">OCI Image Format Specification</a>.
+Commands verified 2026-10-06 on Docker 28.3 (macOS).</p>
+
+<nav class="pager"><span class="off">← pre-flight check</span><span class="off">next: your web server →</span></nav>
+
+</main>
+</body>
+</html>
