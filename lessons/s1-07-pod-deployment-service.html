@@ -29,7 +29,7 @@
 
 <p>A <strong>Deployment</strong> is where you write down what you want: "keep this many Pods from this template running".<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup> It does not make Pods itself. It creates a <strong>ReplicaSet</strong>, whose only job is to keep the right number of matching Pods alive. One too few, and it creates one.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/">[3]</a></sup> You will see all three objects in step 3, and their names give the chain away: <code>hello</code> → <code>hello-6f4569fc87</code> → <code>hello-6f4569fc87-7d8zn</code>.</p>
 
-<p>Why two layers? When you change the image, the Deployment makes a <em>new</em> ReplicaSet and shifts Pods over gradually. For today, one Deployment means one ReplicaSet.</p>
+<p>Why two layers? When you change the image, the Deployment makes a <em>new</em> ReplicaSet and shifts Pods over gradually. For today, one Deployment means one ReplicaSet; you will see the second one when you ship a new version in <a href="s1-08-write-the-yaml.html">lesson 08</a>.</p>
 
 <h2>Service: a stable address for changing Pods</h2>
 
