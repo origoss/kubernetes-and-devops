@@ -10,14 +10,14 @@
 <body>
 <main>
 
-<p class="crumbs">Session 1 · Docker · about 20 minutes</p>
+<p class="crumbs">Session 1 · Docker · about 20 minutes · do it after the session</p>
 <h1>Advanced Dockerfile: multi-stage, EXPOSE, VOLUME, USER</h1>
 
 <div class="win">
   <strong>Your win:</strong> a 20&nbsp;MB image of <em>your own</em> web server that documents its port, declares where its data lives, and runs as a non-root user. You can explain what each of those four instructions does and what it does <em>not</em> do.
 </div>
 
-<p class="meta">Before this: you have a Go server with <code>/</code> and <code>/healthz</code> that reads its port from <code>PORT</code>, the <code>hello:single</code> image from <a href="s1-03-first-dockerfile.html">lesson 03</a>, and Docker running (Docker Desktop on a Mac, Docker Engine on Linux or WSL).</p>
+<p class="meta">Before this: you have a Go server with <code>/</code> and <code>/healthz</code> that reads its port from <code>PORT</code>, the <code>hello:single</code> image from <a href="s1-03-first-dockerfile.html">lesson 03</a>, and Docker running (the pre-flight check passed).</p>
 
 <h2>Multi-stage: build fat, ship thin</h2>
 
@@ -124,7 +124,7 @@ ok</pre>
 OCI runtime exec failed: exec failed: unable to start container process:
 exec: "sh": executable file not found in $PATH: unknown</pre>
   </details>
-  <p class="note">That error is the point: there is no shell to exec into. When you need to debug a distroless container, you attach a debug container instead; you will meet <code>kubectl debug</code> later.</p>
+  <p class="note">That error is the point: there is no shell to exec into. When you need to debug a distroless container, you attach a debug container instead; in Kubernetes that is <code>kubectl debug</code>, later in the course.</p>
 </li>
 
 <li>
