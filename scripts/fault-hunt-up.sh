@@ -18,6 +18,10 @@ if [ ! -f go.mod ] || [ ! -d .git ]; then
   echo "Run this from the root of your hello repository (where go.mod is)." >&2
   exit 2
 fi
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is not running. Start Docker Desktop (or the Docker service on Linux) and try again." >&2
+  exit 1
+fi
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Image $IMAGE not found locally. Build it as in lesson 07: docker build -t $IMAGE ." >&2
   exit 1

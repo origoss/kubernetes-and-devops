@@ -40,7 +40,7 @@
 </ul>
 
 <h2>Set up</h2>
-<p>The setup script creates a separate one-node kind cluster called <code>fault-hunt</code>, so your lesson cluster stays untouched. It copies your <code>hello:0.1.1</code> image into the cluster, copies the broken manifests and a report template into <code>fault-hunt/</code> in your repository, and applies them. Get the latest course material first:</p>
+<p>The setup script creates a separate one-node kind cluster called <code>fault-hunt</code>, so your lesson cluster stays untouched. It copies your <code>hello:0.1.1</code> image into the cluster, copies the broken manifests and a report template into <code>fault-hunt/</code> in your repository, and applies them. Before you run it, <strong>start Docker</strong> (Docker Desktop, or the Docker service on Linux) and wait until it is running: <code>docker info</code> must answer without an error. kind runs the cluster inside Docker. Then get the latest course material:</p>
 <pre class="cmd">git -C ../kubernetes-and-devops pull</pre>
 <p>Then, from the root of your <code>hello</code> repository:</p>
 <pre class="cmd">bash ../kubernetes-and-devops/scripts/fault-hunt-up.sh</pre>
