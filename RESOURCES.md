@@ -110,6 +110,8 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
 - [Docs: docker login](https://docs.docker.com/reference/cli/docker/login/), [docker image tag](https://docs.docker.com/reference/cli/docker/image/tag/), [docker run --restart](https://docs.docker.com/reference/cli/docker/container/run/#restart) (Docker). Use for: exact CLI behaviour.
 - [Docs: Images (Kubernetes)](https://kubernetes.io/docs/concepts/containers/images/). Use for: imagePullPolicy and the `:latest` trap.
 - [Docs: Controllers (Kubernetes)](https://kubernetes.io/docs/concepts/architecture/controller/). Use for: desired state and reconciliation.
+- [Docs: Cluster Architecture (Kubernetes)](https://kubernetes.io/docs/concepts/architecture/). Use for: control plane vs worker nodes.
+- [Docs: Kubernetes Components (Kubernetes)](https://kubernetes.io/docs/concepts/overview/components/). Use for: what each component does.
 - [Article: The Twelve-Factor App, Config](https://12factor.net/config). Use for: why the port comes from an environment variable.
 - [Site: Retrieval Practice (Agarwal & Bain)](https://www.retrievalpractice.org/). Use for: why the recap quiz is spaced.
 

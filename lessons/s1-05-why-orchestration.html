@@ -10,7 +10,7 @@
 <body>
 <main>
 
-<p class="crumbs">Session 1 · Kubernetes · about 10 minutes · read before the session</p>
+<p class="crumbs">Session 1 · Kubernetes · about 15 minutes · read before the session</p>
 <h1>Why orchestration?</h1>
 
 <div class="win">
@@ -40,9 +40,61 @@
 
 <p>So, in one sentence: <strong>an orchestrator keeps the actual state of your containers matching the state you declared, across many machines.</strong></p>
 
+<h2>Inside a Kubernetes cluster</h2>
+
+<p>A cluster is a set of machines called <strong>nodes</strong>. The <strong>control plane</strong> makes the decisions and keeps the record. The <strong>worker nodes</strong> run your containers.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/architecture/">[4]</a></sup></p>
+
+<figure>
+<svg viewBox="0 0 640 350" role="img" aria-labelledby="k8sarch" style="width:100%;height:auto;font-family:var(--mono);font-size:13px">
+  <title id="k8sarch">kubectl talks to the kube-apiserver in the control plane. The control plane also holds etcd, kube-scheduler and kube-controller-manager. Each worker node runs a kubelet, kube-proxy and containerd, which runs the Pods with your app.</title>
+  <g fill="none" stroke="currentColor" stroke-width="1.2">
+    <rect x="10" y="40" width="110" height="34" rx="3"/>
+    <rect x="150" y="10" width="480" height="125" rx="4" stroke="var(--accent)"/>
+    <rect x="170" y="40" width="160" height="34" rx="3" stroke="var(--accent)"/>
+    <rect x="170" y="85" width="80" height="34" rx="3"/><rect x="260" y="85" width="125" height="34" rx="3"/><rect x="395" y="85" width="220" height="34" rx="3"/>
+    <line x1="120" y1="57" x2="170" y2="57"/>
+    <line x1="160" y1="135" x2="160" y2="170"/><line x1="480" y1="135" x2="480" y2="170"/>
+    <rect x="10" y="170" width="305" height="135" rx="4"/><rect x="325" y="170" width="305" height="135" rx="4"/>
+    <rect x="22" y="205" width="75" height="34" rx="3"/><rect x="105" y="205" width="95" height="34" rx="3"/><rect x="208" y="205" width="97" height="34" rx="3"/>
+    <rect x="337" y="205" width="75" height="34" rx="3"/><rect x="420" y="205" width="95" height="34" rx="3"/><rect x="523" y="205" width="97" height="34" rx="3"/>
+    <g stroke-dasharray="4 3"><rect x="25" y="255" width="135" height="34" rx="3"/><rect x="170" y="255" width="135" height="34" rx="3"/><rect x="340" y="255" width="135" height="34" rx="3"/><rect x="485" y="255" width="135" height="34" rx="3"/></g>
+  </g>
+  <g fill="currentColor">
+    <text x="160" y="28" fill="var(--accent)">control plane</text>
+    <text x="20" y="188">worker node</text><text x="335" y="188">worker node</text>
+    <g text-anchor="middle">
+      <text x="65" y="62">kubectl</text>
+      <text x="250" y="62" fill="var(--accent)">kube-apiserver</text>
+      <text x="210" y="107">etcd</text><text x="322" y="107">kube-scheduler</text><text x="505" y="107">kube-controller-manager</text>
+      <text x="59" y="227">kubelet</text><text x="152" y="227">kube-proxy</text><text x="256" y="227">containerd</text>
+      <text x="374" y="227">kubelet</text><text x="467" y="227">kube-proxy</text><text x="571" y="227">containerd</text>
+      <text x="92" y="277" fill="var(--muted)">Pod: your app</text><text x="237" y="277" fill="var(--muted)">Pod: your app</text>
+      <text x="407" y="277" fill="var(--muted)">Pod: your app</text><text x="552" y="277" fill="var(--muted)">Pod: your app</text>
+      <text x="320" y="335" fill="var(--muted)">kubectl and every node talk only to the kube-apiserver</text>
+    </g>
+  </g>
+</svg>
+</figure>
+
+<p>The control plane:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/components/">[5]</a></sup></p>
+<ul>
+  <li><strong>kube-apiserver</strong>: the front door. Everything talks to it: <code>kubectl</code>, the controllers, the nodes. Nothing talks to the others directly.</li>
+  <li><strong>etcd</strong>: the database. It holds every object, so it holds both the state you declared and the state the nodes report.</li>
+  <li><strong>kube-scheduler</strong>: picks a node for each new Pod, one with enough free CPU and memory.</li>
+  <li><strong>kube-controller-manager</strong>: runs the controllers from above. One of them keeps your three copies at three.</li>
+</ul>
+<p>Every node:</p>
+<ul>
+  <li><strong>kubelet</strong>: the node's agent. It asks the apiserver which Pods belong to its node, has them started, checks them (your <code>/healthz</code> from <a href="s1-02-web-server.html">lesson 02</a>) and reports back.</li>
+  <li><strong>container runtime</strong>: containerd. It pulls images and runs the containers.</li>
+  <li><strong>kube-proxy</strong>: sets up the network rules that let one stable Service address reach whichever Pods are behind it (<a href="s1-07-pod-deployment-service.html">lesson 07</a>).</li>
+</ul>
+
+<p>Follow one change through it. You ask for three copies of your server. The apiserver stores that in etcd. A controller sees zero Pods where three are wanted and creates three. The scheduler gives each one a node. The kubelet on that node has containerd start the container and reports <code>Running</code>. You typed one command; five components did the rest.</p>
+
 <h2>kind: Kubernetes nodes as containers</h2>
 
-<p>A real cluster spans several machines, called <strong>nodes</strong>. You have one laptop. kind solves this neatly: it "runs a local Kubernetes cluster by using Docker containers as 'nodes'".<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[4]</a></sup> Each node is a container that holds a whole Kubernetes machine inside it.</p>
+<p>A real cluster spans several machines, called <strong>nodes</strong>. You have one laptop. kind solves this neatly: it "runs a local Kubernetes cluster by using Docker containers as 'nodes'".<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup> Each node is a container that holds a whole Kubernetes machine inside it. A default kind cluster has a single node that is control plane and worker at once.</p>
 
 <figure>
 <svg viewBox="0 0 640 270" role="img" aria-labelledby="kindfig" style="width:100%;height:auto;font-family:var(--mono);font-size:13px">
@@ -92,11 +144,11 @@ curl: (7) Failed to connect to localhost port 8080 after 1 ms: Couldn't connect 
 </li>
 
 <li>
-  <p>Create a Kubernetes cluster. The first time, kind downloads its node image (about 1&nbsp;GB), so give it a few minutes.</p>
+  <p>Create a Kubernetes cluster. You pulled its node image in the pre-flight check, so this takes about a minute.</p>
 <pre class="cmd">kind create cluster</pre>
   <details class="expect"><summary>Expected output (the version and the last line vary)</summary>
 <pre>Creating cluster "kind" ...
- ✓ Ensuring node image (kindest/node:v1.36.1) 🖼
+ ✓ Ensuring node image (kindest/node:v1.37.0) 🖼
  ✓ Preparing nodes 📦
  ✓ Writing configuration 📜
  ✓ Starting control-plane 🕹️
@@ -107,9 +159,9 @@ You can now use your cluster with:
 
 kubectl cluster-info --context kind-kind
 
-Have a nice day! 👋</pre>
+Have a question, bug, or feature request? Let us know! https://kind.sigs.k8s.io/#community 🙂</pre>
   </details>
-  <p class="note">kind also pointed <code>kubectl</code> at the new cluster: the <em>context</em> <code>kind-kind</code> in <code>~/.kube/config</code>.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[4]</a></sup></p>
+  <p class="note">kind also pointed <code>kubectl</code> at the new cluster: the <em>context</em> <code>kind-kind</code> in <code>~/.kube/config</code>.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup></p>
 </li>
 
 <li>
@@ -117,13 +169,13 @@ Have a nice day! 👋</pre>
 <pre class="cmd">kubectl cluster-info</pre>
 <pre class="cmd">kubectl get nodes</pre>
   <details class="expect"><summary>Expected output (your port differs)</summary>
-<pre>Kubernetes control plane is running at https://127.0.0.1:65491
-CoreDNS is running at https://127.0.0.1:65491/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+<pre>Kubernetes control plane is running at https://127.0.0.1:62635
+CoreDNS is running at https://127.0.0.1:62635/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
 
 To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
 
 NAME                 STATUS   ROLES           AGE   VERSION
-kind-control-plane   Ready    control-plane   2m    v1.36.1</pre>
+kind-control-plane   Ready    control-plane   29s   v1.37.0</pre>
   </details>
   <p>One node. If it says <code>NotReady</code>, wait 20 seconds and ask again: the node network is still starting.</p>
 </li>
@@ -133,7 +185,7 @@ kind-control-plane   Ready    control-plane   2m    v1.36.1</pre>
 <pre class="cmd">docker ps</pre>
   <details class="expect"><summary>Expected output (other containers of yours may be listed too)</summary>
 <pre>CONTAINER ID   IMAGE                  COMMAND                  CREATED         STATUS         PORTS                       NAMES
-81496e50b9a2   kindest/node:v1.36.1   "/usr/local/bin/entr…"   2 minutes ago   Up 2 minutes   127.0.0.1:65491->6443/tcp   kind-control-plane</pre>
+5c45788fed2b   kindest/node:v1.37.0   "/usr/local/bin/entr…"   33 seconds ago  Up 31 seconds  127.0.0.1:62635->6443/tcp   kind-control-plane</pre>
   </details>
   <p>Your whole cluster is this one container. Its port is the address <code>kubectl cluster-info</code> printed.</p>
 </li>
@@ -143,22 +195,22 @@ kind-control-plane   Ready    control-plane   2m    v1.36.1</pre>
 <pre class="cmd">docker exec kind-control-plane crictl ps</pre>
   <details class="expect"><summary>Expected output (trimmed: some columns dropped)</summary>
 <pre>CONTAINER       IMAGE           ...   STATE     NAME                      ...   NAMESPACE
-dd858713988f8   fe81a497e85f1   ...   Running   coredns                   ...   kube-system
-b1a3b84e40d08   fe81a497e85f1   ...   Running   coredns                   ...   kube-system
-96487f949f086   3501a03785a84   ...   Running   local-path-provisioner    ...   local-path-storage
-382b8272d2c27   f2ede2b789a61   ...   Running   kindnet-cni               ...   kube-system
-8279eaaba7150   01ad784c02283   ...   Running   kube-proxy                ...   kube-system
-1647df1bd895d   6da6ea097b384   ...   Running   etcd                      ...   kube-system
-7bea771287e6e   4923943f21256   ...   Running   kube-apiserver            ...   kube-system
-51dca246b7f79   76e62361b06b5   ...   Running   kube-scheduler            ...   kube-system
-f9f70e529d4de   39d983367f38c   ...   Running   kube-controller-manager   ...   kube-system</pre>
+22751856e7b83   fbccbf70a429f   ...   Running   coredns                   ...   kube-system
+84f241463e163   fbccbf70a429f   ...   Running   coredns                   ...   kube-system
+a0018e2a16939   0771a8a05619f   ...   Running   local-path-provisioner    ...   local-path-storage
+ca74a69638958   550b682d81d41   ...   Running   kube-proxy                ...   kube-system
+89834beb78d11   8e13ccc0aaa68   ...   Running   kindnet-cni               ...   kube-system
+2a4a3c69d71a9   c2e426bbd1cd6   ...   Running   etcd                      ...   kube-system
+eab45a23ad04f   b1ad0e33c9012   ...   Running   kube-controller-manager   ...   kube-system
+1b4a168c5cfa9   384eabc4fe526   ...   Running   kube-scheduler            ...   kube-system
+061895ef2491c   6003d52023b9d   ...   Running   kube-apiserver            ...   kube-system</pre>
   </details>
-  <p>Kubernetes itself runs as containers: the API server, the etcd database, the scheduler, the controller manager. In the next lessons your app joins this list, run by containerd, not Docker.</p>
+  <p>The control plane from the diagram runs as containers: kube-apiserver, etcd, kube-scheduler, kube-controller-manager, plus kube-proxy. The kubelet is missing because it is not a container: it is an ordinary service on the node that starts all the others. In the next lessons your app joins this list, run by containerd, not Docker.</p>
 </li>
 
 <li>
   <p><strong>Leave the cluster running.</strong> Lesson 06 starts from it.</p>
-  <p class="note">After a laptop reboot: kind gives its node container a restart policy, so when Docker starts again the node usually comes back with your cluster in it. Check with <code>docker inspect kind-control-plane --format '{{.HostConfig.RestartPolicy.Name}}'</code>, which prints <code>on-failure</code>. If <code>kubectl get nodes</code> errors after a reboot, start over; it takes a minute. When you are finished with it for good, <code>kind delete cluster</code> removes it.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[4]</a></sup></p>
+  <p class="note">After a laptop reboot: kind gives its node container a restart policy, so when Docker starts again the node usually comes back with your cluster in it. Check with <code>docker inspect kind-control-plane --format '{{.HostConfig.RestartPolicy.Name}}'</code>, which prints <code>on-failure</code>. If <code>kubectl get nodes</code> errors after a reboot, start over; it takes a minute. When you are finished with it for good, <code>kind delete cluster</code> removes it.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup></p>
 </li>
 </ol>
 
@@ -180,6 +232,15 @@ f9f70e529d4de   39d983367f38c   ...   Running   kube-controller-manager   ...   
   <button class="opt" data-why="No. A container starts just as fast either way. The difference is who watches it afterwards.">It makes containers start faster than plain Docker can</button>
   <button class="opt" data-why="No. You still build images. Kubernetes runs them; it does not make them.">It replaces images, so you never build them yourself</button>
   <button class="opt" data-why="No. Kubernetes containers are still Linux processes. Your kind node runs in Docker's Linux VM.">It runs containers without any Linux kernel underneath them</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>You declared three copies and one Pod is deleted. Which component notices and creates a replacement?</legend>
+  <button class="opt" data-why="No. The scheduler only picks a node for a Pod that already exists. Someone else has to create it first.">kube-scheduler, because it places every Pod on nodes</button>
+  <button class="opt" data-why="Right. A controller compares the three you declared with the two that exist, and creates one more Pod.">kube-controller-manager, because desired and current state now differ</button>
+  <button class="opt" data-why="No. etcd only stores the record. It never acts on what it stores.">etcd, because it stores the declared replica count</button>
+  <button class="opt" data-why="No. kube-proxy handles Service networking. It creates no Pods.">kube-proxy, because it routes around the missing Pod</button>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
@@ -233,8 +294,10 @@ f9f70e529d4de   39d983367f38c   ...   Running   kube-controller-manager   ...   
 [1] <a href="https://docs.docker.com/reference/cli/docker/container/run/#restart">Docker: docker run, restart policies</a> ·
 [2] <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Kubernetes: Objects in Kubernetes</a> ·
 [3] <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes: Controllers</a> ·
-[4] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>.
-Commands verified 2026-10-06 on Docker 28.3, kind v0.32.0 (node image kindest/node:v1.36.1) and kubectl v1.36.1 (macOS). With kind v0.33.0 your node reports v1.37.0.</p>
+[4] <a href="https://kubernetes.io/docs/concepts/architecture/">Kubernetes: Cluster Architecture</a> ·
+[5] <a href="https://kubernetes.io/docs/concepts/overview/components/">Kubernetes: Components</a> ·
+[6] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>.
+Commands verified 2026-10-06 on Docker 28.3, kind v0.33.0 (node image kindest/node:v1.37.0) and kubectl v1.37.1 (macOS).</p>
 
 <nav class="pager"><a href="s1-04-advanced-dockerfile.html">← previous: advanced Dockerfile</a><a href="s1-06-looking-with-kubectl.html">next: looking with kubectl →</a></nav>
 
