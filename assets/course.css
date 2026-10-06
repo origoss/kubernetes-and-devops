@@ -74,6 +74,11 @@ details.expect pre { margin-top: .4rem; }
 .note { font-size: .85rem; color: var(--muted); border-left: 1px solid var(--rule); padding-left: .8rem; margin: .8rem 0; }
 .warn { font-size: .9rem; background: var(--bad-bg); padding: .6rem .9rem; border-radius: 4px; }
 
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: .8rem 0 1.2rem; }
+th, td { text-align: left; vertical-align: top; padding: .4rem .6rem .4rem 0; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+
 /* Quiz */
 .quiz-q { border: 0; padding: 0; margin: 0 0 2rem; }
 .quiz-q legend { font-weight: 600; margin-bottom: .5rem; padding: 0; }

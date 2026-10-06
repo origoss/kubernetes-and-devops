@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-flight Check</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Setup · about 30 minutes · do it at home, days before the session</p>
+<h1>Pre-flight check</h1>
+
+<div class="win">
+  <strong>Your win:</strong> the pre-flight script ends with a green <code>✔ PRE-FLIGHT PASSED</code>, and your instructor has the screenshot.
+</div>
+
+<p class="meta">Before this: a laptop you can install software on, your home network, and about 15&nbsp;GB of free disk. This lesson is mandatory. Do it at least a few days before Session&nbsp;1, so there is time to fix problems.</p>
+
+<h2>How this course works</h2>
+
+<p>The course is <strong>four in-person sessions</strong>, about a fortnight apart. Each one adds a layer to the same small project, a web server you write yourself:</p>
+
+<table>
+  <thead><tr><th>Session</th><th>Topic</th><th>What your project gains</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Containers and Kubernetes</td><td>your server, in a container, running on a local cluster</td></tr>
+    <tr><td>2</td><td>CI/CD</td><td>a pipeline that tests, builds and publishes it on every change</td></tr>
+    <tr><td>3</td><td>Monitoring and logging</td><td>metrics, dashboards, alerts and searchable logs</td></tr>
+    <tr><td>4</td><td>GitOps</td><td>the cluster deploys itself from your repository</td></tr>
+  </tbody>
+</table>
+
+<p><strong>The course materials live in one public repository:</strong> <a href="https://github.com/origoss/kubernetes-and-devops">github.com/origoss/kubernetes-and-devops</a>. It holds every lesson, homework brief and script. You clone it in step&nbsp;3 below, and run <code>git pull</code> in it before each session to get the latest version.</p>
+
+<p><strong>Your work lives in your own Git repository.</strong> Everyone creates one public GitHub repository at the start (lesson&nbsp;02 shows how) and keeps building in it until the end. After each session there is an exercise. You upload your solution to that repository as a <strong>pull request</strong>, add your instructor <a href="https://github.com/jagyugyaerik"><code>jagyugyaerik</code></a> as a collaborator, and request their review. The instructor reviews every pull request <strong>between sessions</strong>, so feedback arrives before the next meeting.</p>
+
+<p><strong>Everything you need is in these lessons.</strong> Each lesson is short and gives you three things: the background, the exact commands with the output you should expect, and a quiz to check yourself. The exercises only need what the lessons cover. If you get stuck, reread the lesson first, then ask.</p>
+
+<h3>Using AI tools</h3>
+
+<p><strong>Use as much AI as you like</strong>: to explain an error, to suggest a command, to review your code. One rule: <strong>never let an AI put anything into your work, or do anything on your machine, that you do not understand.</strong> Before you accept a line of code, a YAML field or a command, you can say what it does and why it is there. In the review, and in the room, you may be asked to explain any line of your pull request. "The AI wrote it" is not an answer.</p>
+
+<p class="note">Lessons marked <em>before the session</em> prepare you for the room. Lessons marked <em>after the session</em> repeat what we did there, step by step, so you can finish the exercise alone at home.</p>
+
+<h2>Why at home, and why now</h2>
+
+<p>In the room, thirty laptops share one wifi and one public IP address. Docker Hub lets anonymous users pull only <strong>100 images per 6 hours per IP address</strong>.<sup class="cite"><a href="https://docs.docker.com/docker-hub/usage/">[1]</a></sup> The whole room would burn through that before lunch. So you do two things at home: you log in to Docker Hub, which gives you your own allowance of 200 pulls, and you download every image Session&nbsp;1 needs in advance. That is about 3&nbsp;GB, which is fine on your home network and painful on a shared one.</p>
+
+<h2>What your laptop needs</h2>
+
+<ul>
+  <li><strong>RAM:</strong> 16&nbsp;GB recommended, 8&nbsp;GB as the bare minimum. With 8&nbsp;GB, close your browser tabs during the labs.</li>
+  <li><strong>Virtualization switched on.</strong> Macs always have it. On Windows and Linux PCs it is a firmware (BIOS/UEFI) setting called VT-x, AMD-V or SVM.</li>
+  <li><strong>Disk:</strong> about 15&nbsp;GB free for images and clusters.</li>
+</ul>
+
+<p>Containers need a Linux kernel (you will see why in lesson 01). On a Mac, Docker therefore runs inside a small Linux <strong>VM</strong>, and every container and every Kubernetes node you start lives inside that VM's memory, not your laptop's. kind's own docs ask for at least 6&nbsp;GB for that VM and recommend 8&nbsp;GB.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[2]</a></sup> Docker Desktop gives its VM half of your Mac's memory by default. That is enough on a 16&nbsp;GB Mac and too little on an 8&nbsp;GB one, so you check it.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p><strong>Install a container engine.</strong> Pick your operating system.</p>
+
+  <h3>macOS: Docker Desktop</h3>
+  <p>Install <a href="https://docs.docker.com/desktop/setup/install/mac-install/">Docker Desktop for Mac</a>. Pick the Apple silicon or Intel download to match your Mac. It is free for personal use and education.<sup class="cite"><a href="https://docs.docker.com/desktop/setup/install/mac-install/">[3]</a></sup> Start it once, then open <em>Settings</em> and check two things:<sup class="cite"><a href="https://docs.docker.com/desktop/settings-and-maintenance/settings/">[4]</a></sup></p>
+  <ul>
+    <li><em>Resources → Advanced → Memory limit</em>: at least <strong>6&nbsp;GB</strong>, ideally 8&nbsp;GB. The default is half of your Mac's memory, so an 8&nbsp;GB Mac needs this raised as far as it will go.</li>
+    <li><em>Kubernetes</em>: leave <strong>Enable Kubernetes unticked</strong> (it is off by default). We run our own clusters with kind, and a second cluster would only eat memory and CPU.</li>
+  </ul>
+  <p class="note"><strong>Optional alternative: Rancher Desktop.</strong> It works too, if you prefer a fully open-source tool. Install <a href="https://docs.rancherdesktop.io/getting-started/installation/">Rancher Desktop</a>, then in <em>Preferences</em> choose the <strong>dockerd (moby)</strong> container engine, <strong>untick Enable Kubernetes</strong>, and raise <em>Virtual Machine → Hardware → Memory</em> to 6–8&nbsp;GB, because its default is only 4&nbsp;GB.</p>
+
+  <h3>Linux: Docker Engine</h3>
+  <p>Install Docker Engine (<code>docker-ce</code>) natively by following <a href="https://docs.docker.com/engine/install/">Docker's page for your distribution</a>. Then let your user run <code>docker</code> without <code>sudo</code>, and log out and back in:<sup class="cite"><a href="https://docs.docker.com/engine/install/linux-postinstall/">[5]</a></sup></p>
+<pre class="cmd">sudo usermod -aG docker $USER</pre>
+  <p class="note">No VM on Linux: containers use your laptop's memory directly.</p>
+
+  <h3>Windows: WSL2 + Ubuntu, then Docker Desktop or Docker Engine</h3>
+  <p>In an administrator PowerShell, install WSL2 with Ubuntu, then reboot:<sup class="cite"><a href="https://learn.microsoft.com/en-us/windows/wsl/install">[7]</a></sup></p>
+<pre class="cmd">wsl --install -d Ubuntu</pre>
+  <p>Open the <em>Ubuntu</em> terminal. From now on, <strong>everything in this course happens inside that terminal</strong>, whichever engine you pick. Then choose <strong>one</strong> of the two:</p>
+  <ul>
+    <li><strong>Docker Desktop</strong> (easier). Install <a href="https://docs.docker.com/desktop/setup/install/windows-install/">Docker Desktop for Windows</a> with the <em>WSL 2 backend</em>. In <em>Settings → Resources → WSL integration</em>, switch it on for <em>Ubuntu</em>, and leave <em>Kubernetes</em> unticked, as on the Mac.<sup class="cite"><a href="https://docs.docker.com/desktop/features/wsl/">[8]</a></sup> The <code>docker</code> command in your Ubuntu terminal then talks to Docker Desktop.</li>
+    <li><strong>Docker Engine inside WSL</strong> (no Docker Desktop). Install Docker Engine in the Ubuntu terminal by following <a href="https://docs.docker.com/engine/install/ubuntu/">Docker's Ubuntu page</a>, then run the <code>usermod</code> line from the Linux section.</li>
+  </ul>
+  <p class="note">Either way, containers run in the WSL2 VM, which gets half of your PC's memory by default. With 8&nbsp;GB of RAM, close other programs during the labs.<sup class="cite"><a href="https://learn.microsoft.com/en-us/windows/wsl/wsl-config">[9]</a></sup></p>
+  <p class="warn">Do not use Rancher Desktop on Windows: <code>kind create cluster</code> fails on Rancher Desktop with WSL2, and the bug is still open (<a href="https://github.com/rancher-sandbox/rancher-desktop/issues/5604">rancher-desktop #5604</a>).</p>
+
+  <p>On every OS, check that the engine works:</p>
+<pre class="cmd">docker run --rm hello-world</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>Unable to find image 'hello-world:latest' locally
+latest: Pulling from library/hello-world
+...
+Status: Downloaded newer image for hello-world:latest
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.</pre>
+  </details>
+</li>
+
+<li>
+  <p><strong>Install kind v0.33.0, kubectl, Go 1.27 and git.</strong></p>
+  <p>macOS, with <a href="https://brew.sh/">Homebrew</a>:</p>
+<pre class="cmd">brew install kind kubectl go git</pre>
+  <p>Linux and WSL (Ubuntu/Debian; the same URLs work on other distributions):</p>
+<pre class="cmd">ARCH=$(dpkg --print-architecture)
+curl -Lo kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-$ARCH
+sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+curl -LO https://dl.k8s.io/release/v1.37.1/bin/linux/$ARCH/kubectl
+sudo install -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
+curl -LO https://go.dev/dl/go1.27.1.linux-$ARCH.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.27.1.linux-$ARCH.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' &gt;&gt; ~/.bashrc &amp;&amp; source ~/.bashrc
+sudo apt-get install -y git</pre>
+  <p>Check the versions:</p>
+<pre class="cmd">kind version; kubectl version --client; go version; git --version</pre>
+  <details class="expect"><summary>Expected output (Linux arm64 shown)</summary>
+<pre>kind v0.33.0 go1.26.7 linux/arm64
+Client Version: v1.37.1
+Kustomize Version: v5.8.1
+go version go1.27.1 linux/arm64
+git version 2.43.0</pre>
+  </details>
+  <p class="note">The <code>go1.26.7</code> in kind's line is the Go version kind was built with, not yours. Also create a <a href="https://github.com/signup">GitHub account</a> if you do not have one; lesson 02 puts your code there.</p>
+</li>
+
+<li>
+  <p><strong>Clone the course materials.</strong> Pick a folder for the course and clone the repository there (on Windows, inside the Ubuntu terminal):</p>
+<pre class="cmd">git clone https://github.com/origoss/kubernetes-and-devops.git</pre>
+<pre class="cmd">cd kubernetes-and-devops</pre>
+  <p>You can open the lessons from <code>lessons/</code> in your browser, offline. Before each session, update them:</p>
+<pre class="cmd">git pull</pre>
+</li>
+
+<li>
+  <p><strong>Log in to Docker Hub.</strong> Create a free account at <a href="https://hub.docker.com/signup">hub.docker.com</a>, then:</p>
+<pre class="cmd">docker login</pre>
+  <p>Follow the prompt. It may show a one-time code and open your browser. You stay logged in, so you do this once.<sup class="cite"><a href="https://docs.docker.com/reference/cli/docker/login/">[6]</a></sup></p>
+</li>
+
+<li>
+  <p><strong>Pre-pull the Session 1 images.</strong> About 3&nbsp;GB; the two big ones are <code>golang</code> and <code>kindest/node</code>.</p>
+<pre class="cmd">docker pull golang:1.27
+docker pull gcr.io/distroless/static-debian13:nonroot
+docker pull alpine
+docker pull python:3.12-slim
+docker pull python:3.13-slim
+docker pull kindest/node:v1.37.0</pre>
+  <details class="expect"><summary>Expected output (end of each pull)</summary>
+<pre>Status: Downloaded newer image for golang:1.27
+docker.io/library/golang:1.27</pre>
+  </details>
+  <p class="note">If a pull says <code>Image is up to date</code>, you already had it. Fine too.</p>
+</li>
+
+<li>
+  <p><strong>Create a test cluster once, then delete it.</strong> kind runs a whole Kubernetes cluster as containers on your laptop.</p>
+<pre class="cmd">kind create cluster</pre>
+  <details class="expect"><summary>Expected output (takes 30–60 seconds)</summary>
+<pre>Creating cluster "kind" ...
+ ✓ Ensuring node image (kindest/node:v1.37.0) 🖼
+ ✓ Preparing nodes 📦
+ ✓ Writing configuration 📜
+ ✓ Starting control-plane 🕹️
+ ✓ Installing CNI 🔌
+ ✓ Installing StorageClass 💾
+Set kubectl context to "kind-kind"
+...
+Thanks for using kind! 😊</pre>
+  </details>
+<pre class="cmd">kubectl get nodes</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME                 STATUS   ROLES           AGE   VERSION
+kind-control-plane   Ready    control-plane   34s   v1.37.0</pre>
+  </details>
+  <p class="note"><code>NotReady</code> for the first half minute is normal. Run the command again.</p>
+<pre class="cmd">kind delete cluster</pre>
+</li>
+
+<li>
+  <p><strong>Run the pre-flight script.</strong> It is in the course repository you cloned in step&nbsp;3 (<a href="../scripts/preflight.sh"><code>scripts/preflight.sh</code></a>). In the <code>kubernetes-and-devops</code> folder, run it (the Ubuntu terminal on Windows):</p>
+<pre class="cmd">bash scripts/preflight.sh</pre>
+  <p>It checks every tool, the Docker engine and its memory, your Docker Hub login, the pulled images, and it creates and deletes a throwaway cluster. It takes about a minute.</p>
+  <details class="expect"><summary>Expected output (this run was on a Mac with older kind and Go, hence the warnings)</summary>
+<pre>From Code to Cluster: pre-flight check
+2026-10-06 00:31 · Darwin arm64 · user eja
+
+Tools
+✔ docker CLI 28.3.0
+! kind v0.32.0 (the course uses v0.33.x; this should work)
+✔ kubectl v1.36.1
+! Go 1.26.7 (the course uses 1.27; Go will download 1.27 when a project asks for it)
+✔ git 2.55.0
+
+Docker engine
+✔ daemon reachable: Docker Engine 28.3.0 on Docker Desktop
+✔ Docker sees 7.7 GiB RAM and 12 CPUs
+! not logged in to Docker Hub (anonymous pulls: 100 per 6 hours per IP, shared by the whole room)
+    → docker login   (free Docker Hub account)
+✔ can run a container (alpine)
+✔ all Session 1 images are pulled
+
+Kubernetes in Docker (kind)
+  creating a throwaway cluster "preflight" (about a minute)...
+✔ kind created a cluster in 28s and its node is Ready
+✔ throwaway cluster deleted
+
+9 passed, 3 warnings, 0 failed
+✔ PRE-FLIGHT PASSED. Screenshot this and send it to your instructor.</pre>
+  </details>
+  <p><strong>✘ lines must be fixed. ! lines are warnings</strong>: fix them if you can (you should not see the Docker Hub one after step 4). Then <strong>screenshot the whole output and send it to your instructor.</strong></p>
+</li>
+</ol>
+
+<h3>If something fails</h3>
+<ul>
+  <li><code>permission denied ... docker.sock</code> (Linux/WSL): you skipped the <code>usermod</code> line, or did not log out and back in.</li>
+  <li><code>Cannot connect to the Docker daemon</code>: start Docker Desktop (or Rancher Desktop). On Linux and with Docker Engine inside WSL: <code>sudo systemctl start docker</code>.</li>
+  <li><code>The command 'docker' could not be found in this WSL 2 distro</code> (Windows with Docker Desktop): switch on <em>WSL integration</em> for Ubuntu in Docker Desktop's settings.</li>
+  <li><code>toomanyrequests</code> on a pull: you hit the Docker Hub limit. Run <code>docker login</code> and try again later.</li>
+  <li>kind fails or hangs: check the memory setting first, then kind's <a href="https://kind.sigs.k8s.io/docs/user/known-issues/">known issues</a>.</li>
+</ul>
+
+<h2>Check yourself</h2>
+<p class="meta">Each step above exists for a reason. Answer from memory first; wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>Why run <code>docker login</code> before the session, even though all the images are public?</legend>
+  <button class="opt" data-why="No. Public images pull fine without login. The problem is how many pulls are allowed.">Public images cannot be pulled without a Docker Hub account</button>
+  <button class="opt" data-why="No. Login does not change download speed. It changes whose allowance a pull counts against.">Logged-in pulls download faster than anonymous pulls from Docker Hub</button>
+  <button class="opt" data-why="Right. Anonymous pulls are limited per IP address, and the whole room shares one. Logged in, your pulls count against your own account.">The room shares one IP and its anonymous pull limit</button>
+  <button class="opt" data-why="No. Session 2 pushes to GitHub's registry, not Docker Hub, with a different login.">You push your images to Docker Hub in session 2</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why leave Docker Desktop's built-in Kubernetes switched off?</legend>
+  <button class="opt" data-why="Right. It would run a second cluster in the same VM, using memory and CPU that kind needs.">We use kind, so it only wastes VM memory</button>
+  <button class="opt" data-why="No. The two can coexist; the problem is the resources the unused one takes.">kind refuses to start while another cluster is running</button>
+  <button class="opt" data-why="No. It is real Kubernetes. We just do not need it.">Docker Desktop's Kubernetes is not a real Kubernetes cluster</button>
+  <button class="opt" data-why="No. It leaves your kind clusters alone. It just adds a second cluster competing for the same memory.">It deletes your kind clusters whenever it is enabled</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>An 8&nbsp;GB Mac runs Docker Desktop with default settings. How much memory does <code>docker info</code> report?</legend>
+  <button class="opt" data-why="No. Docker runs inside the VM and only sees the VM's memory.">About 8 GB, all of the laptop's memory</button>
+  <button class="opt" data-why="Right. Docker lives in the VM, and Docker Desktop gives the VM half the Mac's memory by default: 4 GB on an 8 GB Mac. That is why you check it.">About 4 GB, which is the VM's default</button>
+  <button class="opt" data-why="No. Docker does not report free memory of the Mac; it reports the VM's total.">Whatever memory is currently free on the Mac</button>
+  <button class="opt" data-why="No. The VM has a fixed size set in Settings.">Unlimited, because the VM grows whenever it needs</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Why does the VM's memory setting matter for this course?</legend>
+  <button class="opt" data-why="No. Your editor and browser run on the Mac, outside the VM.">Your editor and browser also run inside the VM</button>
+  <button class="opt" data-why="No. Images are stored on disk; memory limits what can run at once.">Images are stored in the VM's memory, not disk</button>
+  <button class="opt" data-why="No. A larger VM does not make the CPU faster. It lets more fit at once.">More VM memory makes every single container run faster</button>
+  <button class="opt" data-why="Right. Builds, containers and every kind node share the VM's memory. Too little and things get killed or hang.">All containers and kind nodes must fit inside it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why do Windows students use Docker Desktop or Docker Engine, not Rancher Desktop?</legend>
+  <button class="opt" data-why="Right. kind create cluster fails on Rancher Desktop with WSL2 (rancher-desktop #5604, still open).">kind cannot create clusters on Rancher Desktop with WSL2</button>
+  <button class="opt" data-why="No. Rancher Desktop is free and open source. The reason is a kind bug.">Rancher Desktop needs a paid licence on Windows computers</button>
+  <button class="opt" data-why="No. Rancher Desktop does run on Windows. kind on top of it is what breaks.">Rancher Desktop is not available for Windows at all</button>
+  <button class="opt" data-why="No. Both Docker options also run in the WSL2 VM. The reason is kind compatibility.">The Docker options need no virtual machine running underneath</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>, the sections on installing and creating a cluster (5 minutes). You will come back to it in lesson 05.
+</div>
+
+<p class="ask">Stuck on any step? Ask your instructor or in the course channel well before the session, with your screenshot. A broken setup is easy to fix at home and hard to fix in the room.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://docs.docker.com/docker-hub/usage/">Docker Hub usage and limits</a> ·
+[2] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a> ·
+[3] <a href="https://docs.docker.com/desktop/setup/install/mac-install/">Docker: Install Docker Desktop on Mac</a> ·
+[4] <a href="https://docs.docker.com/desktop/settings-and-maintenance/settings/">Docker: Docker Desktop settings</a> ·
+[5] <a href="https://docs.docker.com/engine/install/linux-postinstall/">Docker: Linux post-installation steps</a> ·
+[6] <a href="https://docs.docker.com/reference/cli/docker/login/">Docker CLI: docker login</a> ·
+[7] <a href="https://learn.microsoft.com/en-us/windows/wsl/install">Microsoft: Install WSL</a> ·
+[8] <a href="https://docs.docker.com/desktop/features/wsl/">Docker: Docker Desktop WSL 2 backend</a> ·
+[9] <a href="https://learn.microsoft.com/en-us/windows/wsl/wsl-config">Microsoft: Advanced settings configuration in WSL</a>.
+Commands verified 2026-10-06 on Docker 28.3, kind 0.32.0 with node image v1.37.0, kubectl 1.36 (macOS); the Linux install block on Ubuntu 24.04 arm64 (kind 0.33.0, kubectl 1.37.1, Go 1.27.1).</p>
+
+<nav class="pager"><span class="off">← start</span><a href="s1-01-why-containers.html">next: why containers? →</a></nav>
+
+</main>
+</body>
+</html>
