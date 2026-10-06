@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session 1 Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  @page { size: A4; margin: 10mm; }
+
+  body { padding: 1.5rem 1rem 3rem; }
+  main.sheet { max-width: 80rem; }
+  .sheet header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem 1.2rem; border-bottom: 2px solid var(--fg); padding-bottom: .3rem; margin-bottom: .8rem; }
+  .sheet h1 { font-size: 1.5rem; margin: 0; }
+  .sheet header .meta { margin: 0; font-size: .75rem; }
+
+  .cols { columns: 3 19rem; column-gap: 1.5rem; column-rule: 1px solid var(--rule); font-size: .74rem; line-height: 1.35; }
+  .cols h2 {
+    font-style: normal; font-weight: 600; font-size: .8rem; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--accent); border-top: 0; border-bottom: 1px solid var(--rule);
+    margin: .7rem 0 .25rem; padding: 0 0 .1rem; break-after: avoid;
+  }
+  .cols section:first-child h2 { margin-top: 0; }
+  .cols code, .cols pre { font-size: .92em; }
+  .cols :not(pre) > code { padding: 0 .2em; }
+  .cols code .nw { white-space: nowrap; }
+
+  /* one entry per line: command, then a short gloss */
+  ul.c { list-style: none; padding: 0; margin: 0; }
+  ul.c li { margin: 0 0 .2rem; padding-left: .9em; text-indent: -.9em; break-inside: avoid; }
+  ul.c li > code:first-child { font-weight: 600; }
+  ul.c li span, .g { color: var(--muted); }
+
+  .cols pre { padding: .35rem .5rem; margin: .2rem 0 .4rem; line-height: 1.3; break-inside: avoid; }
+  .cols pre .k { color: var(--muted); font-style: italic; }
+  .cols p { margin: .2rem 0 .35rem; }
+  .cols .tip { border-left: 2px solid var(--accent); padding-left: .45rem; }
+
+  .cols table { font-size: 1em; margin: .2rem 0 .4rem; }
+  .cols th, .cols td { padding: .12rem .35rem .12rem 0; }
+  .cols th { font-size: .85em; }
+  .cols tr { break-inside: avoid; }
+  .cols td:first-child { font-weight: 600; }
+
+  @media print {
+    html { font-size: 8pt; }
+    body { padding: 0; }
+    .sheet header { margin-bottom: .5rem; }
+    ul.c li { margin-bottom: .1rem; }
+    .cols h2 { margin: .5rem 0 .2rem; }
+    .cols pre { padding: .25rem .4rem; line-height: 1.2; }
+    main.sheet { max-width: none; }
+    .sheet h1 { font-size: 1.35rem; }
+    .cols { columns: 3; column-gap: 4mm; font-size: .8rem; line-height: 1.22; }
+    .cols pre { white-space: pre; background: #f3f1e6; }
+    .cols :not(pre) > code { background: none; padding: 0; }
+    .cols h2 { color: #a3301e; }
+    ul.c li span, .g, .cols pre .k { color: #444; }
+  }
+</style>
+</head>
+<body>
+<main class="sheet">
+
+<header>
+  <p class="crumbs">From Code to Cluster · Session 1 · reference</p>
+  <h1>Session 1 cheat sheet</h1>
+  <p class="meta">Docker → Dockerfile → kind → kubectl → Deployment + Service → probes and resources. Names follow the lessons: image <code>hello</code>, folder <code>k8s/</code>.</p>
+</header>
+
+<div class="cols">
+
+<section>
+<h2>Docker: images</h2>
+<ul class="c">
+  <li><code><span class="nw">docker</span> <span class="nw">build</span> <span class="nw">-t</span> <span class="nw">hello:multi</span> <span class="nw">.</span></code> <span>build ./Dockerfile, name it <code><span class="nw">name:tag</span></code></span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">build</span> <span class="nw">-f</span> <span class="nw">Dockerfile.single</span> <span class="nw">-t</span> <span class="nw">hello:single</span> <span class="nw">.</span></code> <span>another Dockerfile</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">images</span> <span class="nw">hello</span></code> <span>list images and sizes</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">tag</span> <span class="nw">hello:multi</span> <span class="nw">hello:0.1.0</span></code> <span>second name, same image</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">history</span> <span class="nw">hello:single</span></code> <span>layers, newest on top</span></li>
+</ul>
+<p class="tip">Tags: version them (<code><span class="nw">0.1.0</span></code>, <code><span class="nw">0.1.1</span></code>). Never <code><span class="nw">:latest</span></code> with kind: its pull policy is <code><span class="nw">Always</span></code>, so the loaded copy is ignored.</p>
+
+<h2>Docker: containers</h2>
+<ul class="c">
+  <li><code><span class="nw">docker</span> <span class="nw">run</span> <span class="nw">-d</span> <span class="nw">--name</span> <span class="nw">hello</span> <span class="nw">-p</span> <span class="nw">8080:8080</span> <span class="nw">hello:multi</span></code> <span><code><span class="nw">-d</span></code> background, <code><span class="nw">-p</span></code> host:container</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">run</span> <span class="nw">-d</span> <span class="nw">--name</span> <span class="nw">hello</span> <span class="nw">-e</span> <span class="nw">PORT=9090</span> <span class="nw">-p</span> <span class="nw">8080:9090</span> <span class="nw">hello:single</span></code> <span><code><span class="nw">-e</span></code> env var</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">run</span> <span class="nw">-d</span> <span class="nw">--name</span> <span class="nw">hello</span> <span class="nw">-P</span> <span class="nw">hello:multi</span></code> + <code><span class="nw">docker</span> <span class="nw">port</span> <span class="nw">hello</span></code> <span>EXPOSEd port on a random host port</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">run</span> <span class="nw">--rm</span> <span class="nw">alpine</span> <span class="nw">ps</span></code> <span>remove container when it exits</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">run</span> <span class="nw">…</span> <span class="nw">-v</span> <span class="nw">hello-data:/data</span> <span class="nw">hello:multi</span></code> <span>named volume, outlives the container</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">ps</span></code> · <code><span class="nw">docker</span> <span class="nw">ps</span> <span class="nw">-a</span></code> <span>running · all, incl. exited</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">logs</span> <span class="nw">hello</span></code> <span>what the process printed</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">exec</span> <span class="nw">-it</span> <span class="nw">hello</span> <span class="nw">sh</span></code> <span>shell inside (none in distroless)</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">stop</span> <span class="nw">hello</span></code> · <code><span class="nw">docker</span> <span class="nw">rm</span> <span class="nw">hello</span></code> · <code><span class="nw">docker</span> <span class="nw">rm</span> <span class="nw">-f</span> <span class="nw">hello</span></code> <span>stop · remove · both</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">volume</span> <span class="nw">rm</span> <span class="nw">hello-data</span></code> <span>delete a named volume</span></li>
+</ul>
+<p class="g">Exit code 137 = killed. Docker does not restart it.</p>
+</section>
+
+<section>
+<h2>Dockerfile (multi-stage)</h2>
+<pre><span class="k"># stage 1: has the Go toolchain</span>
+FROM golang:1.27 AS build
+WORKDIR /src          <span class="k"># cd for next steps</span>
+COPY go.mod ./        <span class="k"># rarely changes</span>
+COPY *.go ./          <span class="k"># changes often</span>
+RUN CGO_ENABLED=0 go build -o /server .
+
+<span class="k"># stage 2: only what you copy across</span>
+FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=build /server /server
+EXPOSE 8080           <span class="k"># docs only, not -p</span>
+USER 65532:65532      <span class="k"># numeric = checkable</span>
+ENTRYPOINT ["/server"] <span class="k"># what starts</span></pre>
+<ul class="c">
+  <li><code><span class="nw">RUN</span></code> <span>runs at build time; <code><span class="nw">CMD</span> <span class="nw">["/server"]</span></code> (lesson 03) also names what to start</span></li>
+  <li><span>Cache: first changed step and every step after it rebuild. Rarely changing steps go first.</span></li>
+  <li><code><span class="nw">.dockerignore</span></code> <span>keeps <code><span class="nw">.git</span></code>, <code><span class="nw">*.md</span></code>, <code><span class="nw">Dockerfile*</span></code> out of the build context</span></li>
+</ul>
+
+<h2>kind</h2>
+<ul class="c">
+  <li><code><span class="nw">kind</span> <span class="nw">create</span> <span class="nw">cluster</span></code> <span>one node, context <code><span class="nw">kind-kind</span></code></span></li>
+  <li><code><span class="nw">kind</span> <span class="nw">delete</span> <span class="nw">cluster</span></code> · <code><span class="nw">--name</span> <span class="nw">fault-hunt</span></code> <span>also removes its context</span></li>
+  <li><code><span class="nw">kind</span> <span class="nw">load</span> <span class="nw">docker-image</span> <span class="nw">hello:0.1.0</span></code> <span>copy image into the node</span></li>
+  <li><code><span class="nw">kind</span> <span class="nw">export</span> <span class="nw">kubeconfig</span></code> <span>write the context back</span></li>
+  <li><code><span class="nw">docker</span> <span class="nw">exec</span> <span class="nw">kind-control-plane</span> <span class="nw">crictl</span> <span class="nw">images</span></code> <span>images the node has (<code><span class="nw">crictl</span> <span class="nw">ps</span></code>: containers)</span></li>
+</ul>
+
+<h2>kubeconfig and context</h2>
+<p class="g"><code><span class="nw">~/.kube/config</span></code>: clusters + users + contexts (cluster + user). Holds an admin key: never commit it.</p>
+<ul class="c">
+  <li><code><span class="nw">kubectl</span> <span class="nw">config</span> <span class="nw">get-contexts</span></code> <span><code><span class="nw">*</span></code> = current</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">config</span> <span class="nw">use-context</span> <span class="nw">kind-kind</span></code> <span>switch cluster</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">config</span> <span class="nw">view</span> <span class="nw">--minify</span></code> <span>only the current context</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">cluster-info</span></code> · <code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">nodes</span></code> <span>who am I talking to</span></li>
+</ul>
+</section>
+
+<section>
+<h2>kubectl: look</h2>
+<ul class="c">
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">pods</span></code> <span><code><span class="nw">-A</span></code> all namespaces, <code><span class="nw">-n</span> <span class="nw">kube-system</span></code></span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">pods</span> <span class="nw">-o</span> <span class="nw">wide</span></code> <span>+ node and IP</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">pods</span> <span class="nw">-w</span></code> <span>keep watching (Ctrl+C)</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">pods</span> <span class="nw">-l</span> <span class="nw">app=hello</span> <span class="nw">--show-labels</span></code> <span>filter, show labels</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">deploy,rs,pod</span></code> · <code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">svc</span> <span class="nw">-o</span> <span class="nw">wide</span></code></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">pod</span> <span class="nw">hello</span> <span class="nw">-o</span> <span class="nw">yaml</span></code> <span>full object: spec + status</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">describe</span> <span class="nw">pod</span> <span class="nw">NAME</span></code> <span>State, Last State, Events: read bottom-up</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">logs</span> <span class="nw">POD</span></code> · <code><span class="nw">--previous</span></code> <span>program output · the run that died</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">events</span> <span class="nw">--for</span> <span class="nw">pod/NAME</span></code> <span>one object's story</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">events</span> <span class="nw">--sort-by=.lastTimestamp</span></code> <span>all, newest last</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">pods</span> <span class="nw">--sort-by=.metadata.creationTimestamp</span></code> <span>newest Pod last</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">get</span> <span class="nw">endpointslices</span> <span class="nw">-l</span> <span class="nw">kubernetes.io/service-name=hello</span></code> <span>Pods behind the Service</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">exec</span> <span class="nw">two</span> <span class="nw">-c</span> <span class="nw">sidecar</span> <span class="nw">--</span> <span class="nw">wget</span> <span class="nw">-qO-</span> <span class="nw">hello</span></code> <span>call from inside a Pod</span></li>
+</ul>
+<p class="tip">Order: <b>get</b> (which object?) → <b>describe</b> (why?) → <b>logs</b> (only if it started) → compare YAML with <code><span class="nw">-o</span> <span class="nw">yaml</span></code> / <code><span class="nw">diff</span></code>. Change one thing, apply, repeat.</p>
+
+<h2>kubectl: change</h2>
+<ul class="c">
+  <li><code><span class="nw">kubectl</span> <span class="nw">apply</span> <span class="nw">-f</span> <span class="nw">k8s/</span></code> <span>make cluster match files; rerun is safe</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">diff</span> <span class="nw">-f</span> <span class="nw">k8s/</span></code> <span>preview / spot drift</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">delete</span> <span class="nw">pod</span> <span class="nw">NAME</span></code> · <code><span class="nw">kubectl</span> <span class="nw">delete</span> <span class="nw">-f</span> <span class="nw">FILE</span></code></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">create</span> <span class="nw">deployment</span> <span class="nw">hello</span> <span class="nw">--image=hello:0.1.0</span> <span class="nw">--dry-run=client</span> <span class="nw">-o</span> <span class="nw">yaml</span></code> <span>print a skeleton, send nothing</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">run</span> <span class="nw">crashy</span> <span class="nw">--image=hello:0.1.0</span> <span class="nw">--env=PORT=notaport</span></code> <span>one bare test Pod</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">scale</span> <span class="nw">deployment</span> <span class="nw">hello</span> <span class="nw">--replicas=3</span></code> <span>drift: next apply undoes it</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">set</span> <span class="nw">image</span> <span class="nw">deployment/hello</span> <span class="nw">hello=hello:0.1.2</span></code> <span>container=image</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">rollout</span> <span class="nw">status</span> <span class="nw">deployment/hello</span> <span class="nw">--timeout=30s</span></code></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">rollout</span> <span class="nw">history</span> <span class="nw">deployment/hello</span></code></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">rollout</span> <span class="nw">undo</span> <span class="nw">deployment/hello</span></code> <span>emergency brake; fix the file after</span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">port-forward</span> <span class="nw">service/hello</span> <span class="nw">8080:80</span></code> <span>then <code><span class="nw">curl</span> <span class="nw">localhost:8080/</span></code></span></li>
+  <li><code><span class="nw">kubectl</span> <span class="nw">label</span> <span class="nw">pod</span> <span class="nw">NAME</span> <span class="nw">app=debug</span> <span class="nw">--overwrite</span></code> <span>take a Pod out of selectors</span></li>
+</ul>
+<p class="g">Commands forget, files remember: lasting changes go in <code><span class="nw">k8s/*.yaml</span></code> and git.</p>
+</section>
+
+<section>
+<h2>Deployment + Service</h2>
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hello       <span class="k"># Pods it counts</span>
+  template:
+    metadata:
+      labels:
+        app: hello     <span class="k"># = selector</span>
+    spec:
+      containers:
+        - name: hello
+          image: hello:0.1.1
+          ports:
+            - containerPort: 8080 <span class="k"># docs</span>
+          resources:
+            requests:
+              cpu: 50m
+              memory: 16Mi
+            limits:
+              memory: 62Mi
+          startupProbe:    <span class="k"># others wait</span>
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 1
+            failureThreshold: 10
+          readinessProbe:  <span class="k"># no: no traffic</span>
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:   <span class="k"># no: restart</span>
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+spec:
+  selector:
+    app: hello         <span class="k"># Pods with this label</span>
+  ports:
+    - port: 80         <span class="k"># Service listens</span>
+      targetPort: 8080 <span class="k"># container listens</span></pre>
+<p class="g">Every object: <code><span class="nw">apiVersion</span></code>, <code><span class="nw">kind</span></code>, <code><span class="nw">metadata</span></code>, <code><span class="nw">spec</span></code>; cluster adds <code><span class="nw">status</span></code>. Selector ≠ template labels: rejected. Service selector matching nothing: accepted, no endpoints. DNS name: <code><span class="nw">hello</span></code> (<code><span class="nw">hello.default.svc.cluster.local</span></code>).</p>
+
+<h2>Probes</h2>
+<p class="g">HTTP 200–399 = yes. Defaults: <code><span class="nw">periodSeconds</span></code> 10, <code><span class="nw">timeoutSeconds</span></code> 1, <code><span class="nw">failureThreshold</span></code> 3. Liveness asks about this process only, never a dependency. Delete: SIGTERM, wait <code><span class="nw">terminationGracePeriodSeconds</span></code> (30), then SIGKILL.</p>
+
+<h2>Resources, units, QoS</h2>
+<ul class="c">
+  <li><code><span class="nw">requests</span></code> <span>scheduler reserves it before the Pod runs; no room → Pending</span></li>
+  <li><code><span class="nw">limits</span></code> <span>kernel (cgroups) enforces: memory over → OOM kill; CPU over → slowed</span></li>
+  <li><span>request ≤ limit, else the API refuses it</span></li>
+  <li><code><span class="nw">50m</span></code> <span>CPU millicores (1/20 core); <code><span class="nw">1</span></code> = one core</span></li>
+  <li><code><span class="nw">16Mi</span></code> · <code><span class="nw">1Gi</span></code> <span>memory, 1024-based. <code><span class="nw">M</span></code> = million; <code><span class="nw">m</span></code> on memory: never</span></li>
+  <li><span>QoS, evicted first → last: <b>BestEffort</b> (none set) → <b>Burstable</b> (some) → <b>Guaranteed</b> (CPU + memory requests = limits, every container)</span></li>
+</ul>
+</section>
+
+<section>
+<h2>Symptom → where to look</h2>
+<ul class="c sym">
+  <li><b>Pending</b> → <code><span class="nw">describe</span> <span class="nw">pod</span></code>: <code><span class="nw">FailedScheduling</span></code> from default-scheduler: no node has room for the requests</li>
+  <li><b>ContainerCreating, forever</b> → <code><span class="nw">describe</span> <span class="nw">pod</span></code> Events (e.g. <code><span class="nw">FailedMount</span></code>); check resources if the message makes no sense</li>
+  <li><b>ErrImagePull, ImagePullBackOff</b> → <code><span class="nw">describe</span> <span class="nw">pod</span></code>, first <code><span class="nw">Failed</span></code> line above the bottom: image not on the node? <code><span class="nw">crictl</span> <span class="nw">images</span></code>, tag, <code><span class="nw">kind</span> <span class="nw">load</span></code>. <code><span class="nw">logs</span></code> is empty</li>
+  <li><b>CrashLoopBackOff, Error, RESTARTS rising</b> → <code><span class="nw">logs</span> <span class="nw">POD</span> <span class="nw">--previous</span></code>: the dead run's last words; <code><span class="nw">describe</span></code>: Last State, Exit Code; <code><span class="nw">events</span> <span class="nw">--for</span> <span class="nw">pod/NAME</span></code>: "failed liveness / startup probe"?</li>
+  <li><b>OOM</b> → <code><span class="nw">describe</span></code>: StartError "OOM-killed" (RunContainerError, logs empty) or Last State <code><span class="nw">OOMKilled</span></code>, Exit Code 137: memory limit</li>
+  <li><b>Running 0/1</b> → readiness failing: <code><span class="nw">events</span> <span class="nw">--for</span> <span class="nw">pod/NAME</span></code> "Readiness probe failed"; not ready in the EndpointSlice; rollout waits</li>
+  <li><b>Rollout stuck</b> → <code><span class="nw">rollout</span> <span class="nw">status</span></code>, <code><span class="nw">get</span> <span class="nw">rs</span></code>, <code><span class="nw">get</span> <span class="nw">deploy</span></code> (UP-TO-DATE &lt; replicas); read the <em>newest</em> Pod</li>
+  <li><b>Service, no endpoints</b> → <code><span class="nw">get</span> <span class="nw">endpointslices</span> <span class="nw">-l</span> <span class="nw">kubernetes.io/service-name=…</span></code> empty: compare Service selector with <code><span class="nw">get</span> <span class="nw">pods</span> <span class="nw">--show-labels</span></code></li>
+  <li><b>Connection refused</b> → nothing listens at that IP and port. Via a Service: check its endpoints first. In probe Events: which port did the probe ask?</li>
+  <li><b>kubectl: "localhost:8080 was refused"</b> → no current context: <code><span class="nw">config</span> <span class="nw">get-contexts</span></code>, <code><span class="nw">kind</span> <span class="nw">export</span> <span class="nw">kubeconfig</span></code></li>
+</ul>
+<p class="g">Events bottom-up: last line = now; walk up to the first Warning with a real message. <code><span class="nw">(x4</span> <span class="nw">over</span> <span class="nw">2m)</span></code> = still retrying.</p>
+</section>
+
+</div>
+</main>
+</body>
+</html>

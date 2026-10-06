@@ -35,6 +35,8 @@ Open the lessons in a browser. Each one is a short, self-contained HTML page wit
 
 The pre-flight lesson uses [scripts/preflight.sh](scripts/preflight.sh) to check your laptop.
 
+Session 1 [cheat sheet](reference/s1-cheat-sheet.html): every command, the Deployment + Service YAML and a symptom → where-to-look table on one printable A4 page.
+
 Also here: [RESOURCES.md](RESOURCES.md) (the sources behind every lesson) and [GLOSSARY.md](GLOSSARY.md) (the course vocabulary).
 
 Questions? Ask your instructor. That's what they're there for.
