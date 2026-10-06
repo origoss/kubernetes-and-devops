@@ -19,7 +19,7 @@
 
 <p class="meta">Do this a few days after session 1, not right after it. Recalling something you have half-forgotten is what makes it stick, so the effort is the point.<sup class="cite"><a href="https://www.retrievalpractice.org/">[1]</a></sup> No notes, no terminal. The questions are mixed on purpose, not in lesson order.</p>
 
-<h2>Fifteen questions</h2>
+<h2>Sixteen questions</h2>
 
 <fieldset class="quiz-q" data-answer="0">
   <legend><span class="kind"><a href="s1-06-looking-with-kubectl.html">Lesson 06</a> · Concept</span>A Pod sits in <code>Pending</code>. Which command shows you why, first?</legend>
@@ -111,10 +111,19 @@
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s1-05-why-orchestration.html">Lesson 05</a> · Concept</span>A new Pod has no node yet. Which component chooses one for it?</legend>
+  <button class="opt" data-why="No. etcd only stores the cluster's objects. It never decides anything.">etcd, which stores where every Pod lives</button>
+  <button class="opt" data-why="No. The kubelet starts a Pod only after the Pod has been assigned to its node.">kubelet, which runs the Pods on nodes</button>
+  <button class="opt" data-why="Right. The scheduler picks a node with enough unreserved CPU and memory, which is why requests matter (lesson 09).">kube-scheduler, which picks a node with room</button>
+  <button class="opt" data-why="No. kube-proxy sets up Service networking. It does not place Pods.">kube-proxy, which routes traffic to the nodes</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
 <fieldset class="quiz-q" data-answer="1">
   <legend><span class="kind"><a href="s1-05-why-orchestration.html">Lesson 05</a> · Concept</span>Inside the <code>kind-control-plane</code> node, what runs your Pods' containers?</legend>
   <button class="opt" data-why="No. kubectl only talks to the API server.">kubectl itself, which starts processes on each node</button>
-  <button class="opt" data-why="Right. crictl ps lists them, and docker is not even installed in the node. Your Docker-built OCI images run unchanged.">containerd, via the CRI; there is no Docker</button>
+  <button class="opt" data-why="Right. crictl ps lists them, and docker is not even installed in the node. Your Docker-built OCI images run unchanged.">containerd, the runtime; there is no Docker</button>
   <button class="opt" data-why="No. The node is a Docker container on your laptop, but the Pods inside it run on containerd.">your laptop's Docker daemon, shared into every node</button>
   <button class="opt" data-why="No. Containers are processes, not VMs. That was lesson 01.">a small virtual machine started for every pod</button>
   <div class="why" aria-live="polite"></div>
