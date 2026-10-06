@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Health and Resources</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Kubernetes · about 35 minutes · do it after the session</p>
+<h1>Is your server healthy, and how much may it use?</h1>
+
+<div class="win">
+  <strong>Your win:</strong> your Deployment declares requests, a memory limit and all three probes. You have seen each of them go wrong on purpose, and you can say what Kubernetes does when a Pod is out of memory, not ready, stuck, or told to stop.
+</div>
+
+<p class="meta">Before this: <a href="s1-07-pod-deployment-service.html">lesson 07</a>, so your <code>k8s/deployment.yaml</code> (3 replicas of <code>hello:0.1.1</code>) and <code>k8s/service.yaml</code> are applied and committed, and you can read Events bottom-up (<a href="s1-06-looking-with-kubectl.html">lesson 06</a>). Work in your <code>hello</code> repository, except where a step says to use the course repository.</p>
+
+<h2>Two numbers, two different jobs</h2>
+
+<p>For each container you can set two amounts of CPU and memory:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">[1]</a></sup></p>
+
+<ul>
+  <li><strong>requests</strong> are used <em>before</em> the Pod runs. The scheduler places a Pod only on a node that still has that much unreserved capacity. A request is a reservation. It is not a cap: the container may use more if the node has it spare.</li>
+  <li><strong>limits</strong> are enforced <em>while</em> the container runs, by the Linux kernel's <strong>cgroups</strong>, which you met in <a href="s1-01-why-containers.html">lesson 01</a>. Go over the memory limit and the kernel kills the process (OOM, "out of memory"). Go over a CPU limit and the process is only slowed down, never killed.</li>
+</ul>
+
+<p>A request can never be larger than its limit. The API refuses such a Pod.</p>
+
+<h2>Units</h2>
+
+<ul>
+  <li><strong>Memory</strong> is in bytes, usually written with a suffix. <code>Mi</code> is a mebibyte (1024 × 1024 bytes) and <code>Gi</code> a gibibyte. Mind the case: <code>M</code> means a million bytes, and a lowercase <code>m</code> on memory means <em>thousandths</em> of a byte, which is never what you want.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">[1]</a></sup></li>
+  <li><strong>CPU</strong> is in cores, and <code>m</code> means millicores. <code>50m</code> is one twentieth of a core, and <code>1</code> is a whole core.</li>
+</ul>
+
+<p>Your Go server idles at about 1.5&nbsp;MB of memory and almost no CPU, so small values are honest values. We set a CPU request but no CPU limit: going over a CPU limit would only slow the server down, and the request already keeps the scheduler honest.</p>
+
+<h2>QoS classes: who goes first when memory runs out</h2>
+
+<p>From your requests and limits, Kubernetes puts every Pod into a <strong>Quality of Service class</strong>. When a node runs short of memory, the kubelet evicts Pods to save the node, and the class decides the order.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/">[2]</a></sup></p>
+
+<table>
+  <thead><tr><th>Class</th><th>When</th><th>Evicted</th></tr></thead>
+  <tbody>
+    <tr><td><code>BestEffort</code></td><td>no requests and no limits at all</td><td>first</td></tr>
+    <tr><td><code>Burstable</code></td><td>some requests or limits, but not the Guaranteed recipe</td><td>next, those using most above their request first</td></tr>
+    <tr><td><code>Guaranteed</code></td><td>every container has CPU and memory requests equal to its limits</td><td>last</td></tr>
+  </tbody>
+</table>
+
+<p>Everything you ran in lesson 07 was <code>BestEffort</code>: the first to go.</p>
+
+<h2>Three probes, three questions</h2>
+
+<p>The kubelet keeps asking your container questions. A <strong>probe</strong> is one of those questions, here an HTTP <code>GET</code>: any status from 200 to 399 counts as a yes. Kubernetes has three kinds, and each "no" leads to a different action:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">[3]</a></sup></p>
+
+<table>
+  <thead><tr><th>Probe</th><th>The question</th><th>When it fails</th></tr></thead>
+  <tbody>
+    <tr><td><code>startupProbe</code></td><td>Has the app finished starting?</td><td>After <code>failureThreshold</code> misses the container is restarted. Until it succeeds, the other two probes do not run at all.</td></tr>
+    <tr><td><code>readinessProbe</code></td><td>Should this Pod get traffic right now?</td><td>The Pod is marked not ready in the Service's EndpointSlice and gets no traffic. Nothing is restarted; it gets traffic again once it passes.</td></tr>
+    <tr><td><code>livenessProbe</code></td><td>Is the process stuck beyond repair?</td><td>The container is restarted, with <code>SIGTERM</code> first.</td></tr>
+  </tbody>
+</table>
+
+<p>Every probe has the same timing knobs.<sup class="cite"><a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">[4]</a></sup> <code>periodSeconds</code> (default 10) is how often it asks. <code>timeoutSeconds</code> (default 1) is how long one answer may take. <code>failureThreshold</code> (default 3) is how many misses in a row count as failure. <code>initialDelaySeconds</code> is how long to wait before the first question. A startup probe gives a slow app <code>failureThreshold</code> × <code>periodSeconds</code> to come up: 30 × 10 is a 5-minute budget. Without one, the only way to protect a slow starter is a long delay on liveness, which also delays catching real failures.</p>
+
+<h2>Readiness guards your rollouts</h2>
+
+<p>A rolling update removes an old Pod only when a new one is <em>ready</em>. By default it may run 25&nbsp;% more Pods than <code>replicas</code> during the update, and have at most 25&nbsp;% unavailable (<code>maxSurge</code>, <code>maxUnavailable</code>).<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment">[5]</a></sup> So a readiness probe is more than a traffic switch: it is the check that stops a bad version from replacing a good one. In lesson 07 a missing image stopped the rollout; a new version that starts but never becomes ready stops it just the same.</p>
+
+<h2>Stopping gracefully</h2>
+
+<p>When a Pod is deleted, by you, a rollout or a scale-down, two things start at once: the Pod is taken out of the Service's EndpointSlice, so new traffic stops arriving, and the kubelet sends <code>SIGTERM</code> to PID&nbsp;1 in each container. Then it waits up to <code>terminationGracePeriodSeconds</code>, 30 by default. Whatever still runs after that gets <code>SIGKILL</code>, which cannot be caught.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">[6]</a></sup> A well-behaved server uses those seconds to finish the requests it is already serving, then exits 0. Yours does not yet: Go ends it at once on <code>SIGTERM</code>, which is the <code>Error</code> you saw in lesson 07. The homework fixes that.</p>
+
+<h2>The classic mistake</h2>
+
+<p>A liveness probe that checks a <em>dependency</em>. Picture <code>/healthz</code> asking the database: the database goes down, every replica fails liveness, and Kubernetes restarts all of them, over and over. Restarting your server fixes nothing about the database, and now you have two outages. <strong>Liveness asks about this process only.</strong> "The database is down, stop sending me traffic" belongs in readiness, if anywhere.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">[3]</a></sup></p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Before you change anything, check the QoS class of your Pods:</p>
+<pre class="cmd">kubectl get pods -l app=hello -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME                     QOS
+hello-646b86479c-7mpw4   BestEffort
+hello-646b86479c-92zx6   BestEffort
+hello-646b86479c-ds96t   BestEffort</pre>
+  </details>
+</li>
+
+<li>
+  <p>Add a <code>resources</code> block to the container in <code>k8s/deployment.yaml</code>, at the same depth as <code>ports</code>.</p>
+  <p class="filename">k8s/deployment.yaml</p>
+<pre class="file">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+        - name: hello
+          image: hello:0.1.1
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 16Mi
+            limits:
+              memory: 62Mi</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl rollout status deployment/hello</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>deployment.apps/hello configured
+service/hello unchanged
+Waiting for deployment "hello" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "hello" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "hello" rollout to finish: 1 old replicas are pending termination...
+deployment "hello" successfully rolled out</pre>
+  </details>
+  <p>Changing the Pod template made the Deployment replace every Pod, a few at a time: a rolling update, as in lesson 07.</p>
+</li>
+
+<li>
+  <p>Check what the new Pods received. Use one of your Pod names.</p>
+<pre class="cmd">kubectl describe pod hello-8677475c9f-7kx8q</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>    Limits:
+      memory:  62Mi
+    Requests:
+      cpu:        50m
+      memory:     16Mi
+</pre>
+  </details>
+  <p>The server runs fine within 62&nbsp;Mi. And the Pods changed class:</p>
+<pre class="cmd">kubectl get pods -l app=hello -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME                     QOS
+hello-c599d44c-9vqz8     Burstable
+hello-c599d44c-mgqwt     Burstable
+hello-c599d44c-mrt2v     Burstable</pre>
+  </details>
+  <p>Requests are set, but they differ from the limits (and there is no CPU limit), so the class is <code>Burstable</code>.</p>
+</li>
+
+<li>
+  <p>Now break it on purpose: a memory limit far too small. Set <em>both</em> memory values to <code>2Mi</code>. Both, because a request larger than its limit is refused. Try it with only the limit changed and you get:</p>
+<pre>The Deployment "hello" is invalid: spec.template.spec.containers[0].resources.requests: Invalid value: "16Mi": must be less than or equal to memory limit of 2Mi</pre>
+  <p>With both at <code>2Mi</code>, apply and watch:</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl get pods -w</pre>
+  <details class="expect"><summary>Expected output (after about 20 seconds; stop with Ctrl+C)</summary>
+<pre>NAME                     READY   STATUS              RESTARTS      AGE
+hello-5b6b65946-c24cf    0/1     ContainerCreating   0             0s
+hello-8677475c9f-7kx8q   1/1     Running             0             7s
+hello-8677475c9f-bbgwd   1/1     Running             0             7s
+hello-8677475c9f-hs4fs   1/1     Running             0             6s
+hello-5b6b65946-c24cf    0/1     RunContainerError   0             1s
+hello-5b6b65946-c24cf    0/1     RunContainerError   1 (1s ago)    2s
+hello-5b6b65946-c24cf    0/1     CrashLoopBackOff    1 (16s ago)   17s
+hello-5b6b65946-c24cf    0/1     RunContainerError   2 (0s ago)    17s</pre>
+  </details>
+  <p>Two things to notice. The new Pod flips between <code>RunContainerError</code> and <code>CrashLoopBackOff</code>, with restarts climbing. And your three old Pods are <em>still running</em>: the rolling update waits for each new Pod to become ready, and this one never does. <code>kubectl get deploy hello</code> shows <code>READY 3/3</code> but <code>UP-TO-DATE 1</code>. Your server is still up, running the old settings.</p>
+</li>
+
+<li>
+  <p>Find the cause with <code>describe</code> on the failing Pod.</p>
+<pre class="cmd">kubectl describe pod hello-5b6b65946-c24cf</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>    State:          Waiting
+      Reason:       RunContainerError
+    Last State:     Terminated
+      Reason:       StartError
+      Message:      failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: container init was OOM-killed (memory limit too low?)
+      Exit Code:    128
+...
+Events:
+  Type     Reason     Age                From     Message
+  ----     ------     ----               ----     -------
+  Normal   Created    11s (x4 over 1m)   kubelet  spec.containers{hello}: Container created
+  Warning  Failed     11s (x4 over 1m)   kubelet  spec.containers{hello}: Error: failed to create containerd task: ... container init was OOM-killed (memory limit too low?)
+  Warning  BackOff    11s (x3 over 1m)   kubelet  spec.containers{hello}: Back-off restarting failed container hello in pod ...</pre>
+  </details>
+  <p>"container init was OOM-killed (memory limit too low?)": the kernel killed the process before your server even started, because 2&nbsp;Mi is not enough to start any process at all. <code>kubectl logs</code> has nothing to show here, because your program never ran.</p>
+  <p class="note">A server that starts fine and then <em>grows</em> past its limit fails differently: the Last State says <code>Reason: OOMKilled</code> with <code>Exit Code: 137</code>, and it ends in <code>CrashLoopBackOff</code> too.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">[1]</a></sup></p>
+</li>
+
+<li>
+  <p>Break it the other way: ask for far more than your laptop has. Set both memory values to <code>100Gi</code>, then apply and look.</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl get pods</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME                     READY   STATUS    RESTARTS   AGE
+hello-8677475c9f-7kx8q   1/1     Running   0          58s
+hello-8677475c9f-bbgwd   1/1     Running   0          58s
+hello-8677475c9f-hs4fs   1/1     Running   0          57s
+hello-86c79c5c6-fg6rc    0/1     Pending   0          6s</pre>
+  </details>
+<pre class="cmd">kubectl describe pod hello-86c79c5c6-fg6rc</pre>
+  <details class="expect"><summary>Expected output (only the Events)</summary>
+<pre>Events:
+  Type     Reason            Age              From               Message
+  ----     ------            ----             ----               -------
+  Warning  FailedScheduling  5s (x2 over 6s)  default-scheduler  0/1 nodes are available: 1 Insufficient memory. preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.</pre>
+  </details>
+  <p>This time the container never got near a kernel. The scheduler found no node with 100&nbsp;Gi unreserved, so the Pod waits in <code>Pending</code>. It stays there until you lower the request or a big enough node joins. Note who reported it: <code>default-scheduler</code>, not <code>kubelet</code>. Requests are the scheduler's business.</p>
+  <p class="note">One more face of the same mistake, for the record. A ridiculously small limit such as <code>1Ki</code> does not produce an OOM kill at all. The Pod hangs in <code>ContainerCreating</code>, and its Events repeat <code>FailedMount ... no space left on device</code>. Kubernetes mounts a small in-memory volume into every Pod, and that volume is sized by the memory limit, so with 1&nbsp;KiB there is no room for even that. Same root cause, a misleading symptom: always check the resources when a message makes no sense.</p>
+</li>
+
+<li>
+  <p>Restore the working values: requests <code>cpu: 50m</code> and <code>memory: 16Mi</code>, limit <code>memory: 62Mi</code>. Then apply and confirm.</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl rollout status deployment/hello</pre>
+<pre class="cmd">kubectl get pods</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello configured
+service/hello unchanged
+deployment "hello" successfully rolled out
+NAME                     READY   STATUS    RESTARTS   AGE
+hello-8677475c9f-7kx8q   1/1     Running   0          58s
+hello-8677475c9f-bbgwd   1/1     Running   0          58s
+hello-8677475c9f-hs4fs   1/1     Running   0          57s</pre>
+  </details>
+  <p>The broken Pod is gone, and the three good Pods kept running the whole time. The template matches the good one again, so the Deployment simply keeps them.</p>
+<p class="note">You have now seen three faces of one kind of mistake: <code>CrashLoopBackOff</code> with a StartError, <code>Pending</code> with <code>FailedScheduling</code>, and a <code>ContainerCreating</code> that never ends. A misbehaving cluster rarely tells you which number is wrong; you have to read your way there.</p>
+</li>
+
+<li>
+  <p>Now the probes. Add them to the container, at the same depth as <code>resources</code>. All three ask your <code>/healthz</code> on port 8080.</p>
+  <div class="filename">k8s/deployment.yaml (the container part)</div>
+<pre class="file">      containers:
+        - name: hello
+          image: hello:0.1.1
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 16Mi
+            limits:
+              memory: 62Mi
+          startupProbe:           # until this passes, the other two wait
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 1
+            failureThreshold: 10
+          readinessProbe:         # failing: no traffic from the Service
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:          # failing: the container is restarted
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl rollout status deployment/hello</pre>
+  <p>Then <code>describe</code> one of the new Pods (use your own name):</p>
+<pre class="cmd">kubectl describe pod hello-57646c8f98-4nv4p</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>    Liveness:     http-get http://:8080/healthz delay=0s timeout=1s period=10s successThreshold=1 failureThreshold=3
+    Readiness:    http-get http://:8080/healthz delay=0s timeout=1s period=5s successThreshold=1 failureThreshold=3
+    Startup:      http-get http://:8080/healthz delay=0s timeout=1s period=1s successThreshold=1 failureThreshold=10</pre>
+  </details>
+  <p>Your values, plus the defaults you did not write: <code>timeout=1s</code>, <code>failureThreshold=3</code>.</p>
+</li>
+
+<li>
+  <p>Watch each probe fail. In the <strong>course repository</strong> folder, <code>examples/s1-08/probe-demos.yaml</code> holds three Pods running your <code>hello:0.1.1</code>. Each has one probe, and each asks port 9999, where nothing listens. <code>ready-demo</code> also carries the label <code>app: hello</code>, so your Service selects it.</p>
+<pre class="cmd">kubectl apply -f examples/s1-08/probe-demos.yaml</pre>
+  <p>Wait about 40 seconds, then:</p>
+<pre class="cmd">kubectl get pods ready-demo live-demo start-demo</pre>
+<pre class="cmd">kubectl events --for pod/ready-demo</pre>
+<pre class="cmd">kubectl events --for pod/live-demo</pre>
+<pre class="cmd">kubectl events --for pod/start-demo</pre>
+  <details class="expect"><summary>Expected output (the events trimmed to one line each)</summary>
+<pre>NAME         READY   STATUS             RESTARTS      AGE
+ready-demo   0/1     Running            0             40s
+live-demo    0/1     CrashLoopBackOff   3 (12s ago)   40s
+start-demo   0/1     CrashLoopBackOff   3 (4s ago)    40s
+1s (x21 over 40s)   Warning   Unhealthy   Pod/ready-demo   Readiness probe failed: Get "http://10.244.0.14:9999/healthz": dial tcp 10.244.0.14:9999: connect: connection refused
+12s (x4 over 36s)   Normal    Killing     Pod/live-demo    Container hello failed liveness probe, will be restarted
+4s (x4 over 34s)    Normal    Killing     Pod/start-demo   Container hello failed startup probe, will be restarted</pre>
+  </details>
+  <p><code>ready-demo</code> never restarts: it is <code>Running</code> but not ready. The other two are killed and restarted until they back off. Now ask the Service's EndpointSlice which Pods are ready:</p>
+<pre class="cmd">kubectl get endpointslices -l kubernetes.io/service-name=hello -o jsonpath='{range .items[0].endpoints[*]}{.targetRef.name} ready={.conditions.ready}{"\n"}{end}'</pre>
+  <details class="expect"><summary>Expected output (your names differ)</summary>
+<pre>hello-57646c8f98-9shdw ready=true
+hello-57646c8f98-4nv4p ready=true
+hello-57646c8f98-dhchd ready=true
+ready-demo ready=false</pre>
+  </details>
+  <p>The Service did select <code>ready-demo</code>, by its label, but marked it not ready, so no traffic goes there. Clean up:</p>
+<pre class="cmd">kubectl delete -f examples/s1-08/probe-demos.yaml</pre>
+</li>
+
+<li>
+  <p>Let readiness stop a bad rollout. Back in your <code>hello</code> repository, change the <code>readinessProbe</code>'s <code>port</code> to <code>9999</code>, as if you had made a typo, and apply.</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl rollout status deployment/hello --timeout=30s</pre>
+<pre class="cmd">kubectl get pods -l app=hello</pre>
+<pre class="cmd">kubectl get deploy hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello configured
+service/hello unchanged
+Waiting for deployment "hello" rollout to finish: 1 out of 3 new replicas have been updated...
+error: timed out waiting for the condition
+NAME                     READY   STATUS    RESTARTS   AGE
+hello-5ccd5bcd4b-qwjvb   0/1     Running   0          30s
+hello-757f547d9-64m47    1/1     Running   0          50s
+hello-757f547d9-frm4l    1/1     Running   0          47s
+hello-757f547d9-xm6pz    1/1     Running   0          45s
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+hello   3/3     1            3           2m1s</pre>
+  </details>
+  <p>The new Pod runs, but never becomes ready, so the rollout stops after one: your three old Pods keep serving (<code>AVAILABLE 3</code>). Its Events say why: <code>Readiness probe failed: ... :9999/healthz: connect: connection refused</code>. Put the port back to <code>8080</code>, apply, and the rollout finishes.</p>
+  <p class="note">Why a wrong <em>port</em> and not a wrong <em>path</em>? Try <code>path: /ready</code> and the probe passes: your server's <code>GET /</code> pattern catches every path no other pattern claims (lesson 02), and answers 200. A health endpoint that answers yes to everything is a trap. Check what your probe really reaches.</p>
+</li>
+
+<li>
+  <p>Stopping. Look at the grace period, then time two deletions: one of your Pods, and a Pod whose PID&nbsp;1 ignores <code>SIGTERM</code> (<code>sleep</code> as PID&nbsp;1 has no handler for it, so the signal does nothing).</p>
+<pre class="cmd">kubectl get pod hello-57646c8f98-8cf8r -o jsonpath='{.spec.terminationGracePeriodSeconds}{"\n"}'</pre>
+<pre class="cmd">time kubectl delete pod hello-57646c8f98-8cf8r</pre>
+<pre class="cmd">kubectl run sleeper --image=busybox:1.37 -- sleep 3600</pre>
+<pre class="cmd">time kubectl delete pod sleeper</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>30
+pod "hello-57646c8f98-8cf8r" deleted from default namespace
+real	0m0.90s
+pod/sleeper created
+pod "sleeper" deleted from default namespace
+real	0m31.60s</pre>
+  </details>
+  <p>Your server went in under a second: Go exits at once on <code>SIGTERM</code> (too abruptly, as the homework will show, but at least it exits). <code>sleeper</code> ignored the signal, so Kubernetes waited the full 30 seconds and then sent <code>SIGKILL</code>. A process that ignores <code>SIGTERM</code> makes every rollout and every scale-down slow.</p>
+</li>
+
+<li>
+  <p>Run <code>git diff</code>: it should show the <code>resources</code> block and the three probes, all on port 8080. Then commit and push.</p>
+<pre class="cmd">git add k8s/deployment.yaml</pre>
+<pre class="cmd">git commit -m "Add resource requests, a memory limit and probes"</pre>
+<pre class="cmd">git push</pre>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>Who acts on a container's memory <em>request</em>?</legend>
+  <button class="opt" data-why="No. The kernel enforces limits. A request is never enforced at runtime.">The kernel, which kills the process when it goes over</button>
+  <button class="opt" data-why="Right. The scheduler only places the Pod on a node with that much unreserved capacity.">The scheduler, which picks a node with enough free capacity</button>
+  <button class="opt" data-why="No. Your program never sees the request unless you pass it in yourself.">Your program, which reads it and limits its own usage</button>
+  <button class="opt" data-why="No. The Service routes traffic and knows nothing about memory.">The Service, which stops sending traffic to busy Pods first</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>You set requests and limits to <code>memory: 100Gi</code> on a laptop cluster. What does <code>kubectl get pods</code> show for the new Pod?</legend>
+  <button class="opt" data-why="Right. FailedScheduling: 0/1 nodes are available: 1 Insufficient memory. It waits until you lower the request.">Pending, because no node has that much memory to reserve</button>
+  <button class="opt" data-why="No. The Pod never reaches a node, so no container ever starts or gets killed.">OOMKilled, because the whole laptop runs out of memory instead</button>
+  <button class="opt" data-why="No. A request is not used up straight away. The trouble is that no node can promise it.">Running, because requests are only a soft hint to Kubernetes</button>
+  <button class="opt" data-why="No. 100Gi is a perfectly valid value. Only the scheduler objects.">An apply error, because 100Gi is not a valid size</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You set requests and limits to <code>memory: 2Mi</code> for your Go server. What do you see?</legend>
+  <button class="opt" data-why="No. 2Mi is easy to reserve, so scheduling works. The trouble starts when the container starts.">Pending with FailedScheduling, because 2Mi is too small to schedule</button>
+  <button class="opt" data-why="No. The process is killed while it starts, before your server prints anything.">Running, and kubectl logs prints an out of memory message</button>
+  <button class="opt" data-why="Right. RunContainerError and CrashLoopBackOff. describe says: container init was OOM-killed (memory limit too low?).">CrashLoopBackOff, and describe says that the container init was OOM-killed</button>
+  <button class="opt" data-why="No. That is the 1Ki case, where even the small in-memory volume does not fit.">ContainerCreating forever, with FailedMount and no space left on device</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>A Pod's only container has no requests and no limits. What is its QoS class?</legend>
+  <button class="opt" data-why="No. Guaranteed needs CPU and memory requests equal to limits in every container.">Guaranteed, because nothing at all limits it now</button>
+  <button class="opt" data-why="No. Burstable needs at least one request or limit.">Burstable, because it may use any spare memory</button>
+  <button class="opt" data-why="Right. No requests and no limits: BestEffort, the first to be evicted when the node runs short of memory.">BestEffort, and it is evicted first under pressure</button>
+  <button class="opt" data-why="No. Every Pod gets a class; it is in status.qosClass.">None, because only Pods with limits get classes</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>A Pod's <em>readiness</em> probe keeps failing, but the server inside is fine. What happens to the Pod?</legend>
+  <button class="opt" data-why="Right. Readiness only decides traffic. The Pod stays Running, marked ready=false in the EndpointSlice.">It keeps running, but the Service sends it no traffic</button>
+  <button class="opt" data-why="No. Restarting is what a failing liveness or startup probe does.">The kubelet restarts its container until it passes the probe</button>
+  <button class="opt" data-why="No. Nothing deletes the Pod. It just gets no traffic until it passes.">The ReplicaSet deletes it and creates a fresh replacement Pod</button>
+  <button class="opt" data-why="No. Scheduling happened long before. Probes run on the node where the Pod already is.">The scheduler moves it to a different, healthier node instead</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Why should <code>/healthz</code>, used by the liveness probe, never check the database?</legend>
+  <button class="opt" data-why="No. Speed is not the problem. Restarting the wrong thing is.">Database calls are too slow for a one-second probe timeout</button>
+  <button class="opt" data-why="No. A probe can reach anything the Pod can reach. That is exactly the danger.">Probes are not allowed to open connections to other Services</button>
+  <button class="opt" data-why="No. The probe would work. Its consequence is what hurts.">The kubelet cannot read the answer of a database query</button>
+  <button class="opt" data-why="Right. Liveness restarts. A database outage would make every replica restart over and over, fixing nothing.">A database outage would restart every replica, and fix nothing</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>You roll out a version whose readiness probe can never pass. What do the users of your Service notice?</legend>
+  <button class="opt" data-why="No. Old Pods are removed only when new ones are ready, so they stay.">An outage, because all old Pods are replaced at once</button>
+  <button class="opt" data-why="Right. The rollout stalls after the first new Pod; the old Pods stay ready and keep serving.">Nothing, because the three old Pods keep serving the traffic</button>
+  <button class="opt" data-why="No. A Deployment never rolls back by itself. It just waits.">A short outage, then an automatic rollback to version 0.1.1</button>
+  <button class="opt" data-why="No. A not-ready Pod gets no traffic at all from the Service.">Errors from the new Pod, which now gets some traffic</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>A container's PID&nbsp;1 ignores <code>SIGTERM</code>. With default settings, how long does <code>kubectl delete pod</code> take?</legend>
+  <button class="opt" data-why="No. Kubernetes asks politely first, and waits.">Under a second, because Kubernetes kills it straight away</button>
+  <button class="opt" data-why="No. There is a limit: the grace period, then SIGKILL.">Forever, because the process never agrees to stop running</button>
+  <button class="opt" data-why="Right. terminationGracePeriodSeconds is 30 by default; then SIGKILL, which cannot be ignored.">About 30 seconds: the grace period, then a SIGKILL</button>
+  <button class="opt" data-why="No. Ten seconds is a probe's default period, not the grace period.">About 10 seconds, the default period of every probe</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">Kubernetes: Configure Liveness, Readiness and Startup Probes</a>. It shows every probe type (HTTP, TCP, command, gRPC) with small examples. About fifteen minutes.
+</div>
+
+<p class="ask">Not sure why a value or a probe fails? Ask your instructor, with the Pod's Events.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">Kubernetes: Resource management for Pods and containers</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/">Kubernetes: Pod Quality of Service classes</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">Kubernetes: Liveness, Readiness and Startup Probes</a> ·
+[4] <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">Kubernetes: Configure Liveness, Readiness and Startup Probes</a> ·
+[5] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment">Kubernetes: Deployments, rolling update</a> ·
+[6] <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Kubernetes: Pod lifecycle, termination</a>.
+Commands verified 2026-10-06 on kind 0.33.0 with node image kindest/node:v1.37.0, kubectl 1.37.1 and Docker 28.3 (macOS).</p>
+
+<nav class="pager"><a href="s1-07-pod-deployment-service.html">← previous: Pod, Deployment, Service</a><a href="s1-09-recap-quiz.html">next: recap quiz →</a></nav>
+
+</main>
+</body>
+</html>

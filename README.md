@@ -16,7 +16,7 @@ Open the lessons in a browser. Each one is a short, self-contained HTML page wit
 | 05 | [Why orchestration + kind](lessons/s1-05-why-orchestration.html) | 20' | before |
 | 06 | [Looking with kubectl](lessons/s1-06-looking-with-kubectl.html) | 15' | after |
 | 07 | [Pod, Deployment, Service: YAML, update and roll back](lessons/s1-07-pod-deployment-service.html) | 60' | after |
-| 08 | [Requests & limits](lessons/s1-08-requests-limits.html) | 10' | after |
+| 08 | [Health and resources: requests, limits, QoS, probes, shutdown](lessons/s1-08-health-and-resources.html) | 35' | after |
 | 09 | [Recap quiz](lessons/s1-09-recap-quiz.html) | ~12' | before session 2 |
 
 ### Homework 1 (between session 1 and session 2)

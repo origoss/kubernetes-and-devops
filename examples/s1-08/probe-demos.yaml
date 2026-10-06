@@ -1,0 +1,47 @@
+# Three Pods whose probes ask port 9999, where nothing listens.
+# Each one shows what a different kind of failing probe does.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ready-demo
+  labels:
+    app: hello               # so the Service hello selects it too
+spec:
+  containers:
+    - name: hello
+      image: hello:0.1.1
+      readinessProbe:        # "should I get traffic?"
+        httpGet:
+          path: /healthz
+          port: 9999
+        periodSeconds: 2
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: live-demo
+spec:
+  containers:
+    - name: hello
+      image: hello:0.1.1
+      livenessProbe:         # "are you stuck beyond repair?"
+        httpGet:
+          path: /healthz
+          port: 9999
+        periodSeconds: 2
+        failureThreshold: 2
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: start-demo
+spec:
+  containers:
+    - name: hello
+      image: hello:0.1.1
+      startupProbe:          # "have you finished starting?"
+        httpGet:
+          path: /healthz
+          port: 9999
+        periodSeconds: 2
+        failureThreshold: 3

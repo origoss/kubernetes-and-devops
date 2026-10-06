@@ -118,6 +118,9 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
 - [Docs: Owners and Dependents (Kubernetes)](https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/). Use for: ownerReferences, garbage collection.
 - [Docs: EndpointSlices (Kubernetes)](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/). Use for: the Pods behind a Service.
 - [Docs: DNS for Services and Pods (Kubernetes)](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/). Use for: service names, `<service>.<namespace>.svc.cluster.local`.
+- [Docs: Pod Quality of Service classes (Kubernetes)](https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/). Use for: BestEffort, Burstable, Guaranteed and eviction order.
+- [Docs: Liveness, Readiness and Startup Probes (Kubernetes)](https://kubernetes.io/docs/concepts/workloads/pods/probes/). Use for: what each probe failure does.
+- [Docs: Pod lifecycle, termination (Kubernetes)](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination). Use for: SIGTERM, grace period, SIGKILL.
 - [Article: The Twelve-Factor App, Config](https://12factor.net/config). Use for: why the port comes from an environment variable.
 - [Site: Retrieval Practice (Agarwal & Bain)](https://www.retrievalpractice.org/). Use for: why the recap quiz is spaced.
 
