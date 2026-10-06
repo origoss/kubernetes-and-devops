@@ -17,7 +17,7 @@
   <strong>Your win:</strong> a real Kubernetes cluster is running on your laptop, and you can say in one sentence what an orchestrator is for.
 </div>
 
-<p class="meta">Before this: Docker, kind and kubectl work (the <a href="s1-00-preflight.html">pre-flight check</a>), and you have the <code>hello:multi</code> image from <a href="s1-04-advanced-dockerfile.html">lesson 04</a>.</p>
+<p class="meta">Before this: Docker, kind and kubectl work (the <a href="s1-00-preflight.html">pre-flight check</a>).</p>
 
 <h2>Pains you have already met</h2>
 
@@ -125,22 +125,20 @@
 
 <ol class="steps">
 <li>
-  <p>Feel the first pain. Start your server, check it, then kill it the way a crash would.</p>
-<pre class="cmd">docker run -d --name hello -p 8080:8080 hello:multi</pre>
-<pre class="cmd">curl localhost:8080/healthz</pre>
+  <p>Feel the first pain. Start a container that keeps running (it just sleeps for ten minutes), check it, then kill it the way a crash would.</p>
+<pre class="cmd">docker run -d --name hello python:3.13-slim sleep 600</pre>
+<pre class="cmd">docker ps --filter name=hello</pre>
 <pre class="cmd">docker kill hello</pre>
 <pre class="cmd">docker ps -a --filter name=hello</pre>
-<pre class="cmd">curl localhost:8080/healthz</pre>
   <details class="expect"><summary>Expected output (IDs and times differ)</summary>
-<pre>ok
+<pre>CONTAINER ID   IMAGE              COMMAND       CREATED         STATUS         PORTS     NAMES
+6f7434adc543   python:3.13-slim   "sleep 600"   2 seconds ago   Up 2 seconds             hello
 hello
-CONTAINER ID   IMAGE         COMMAND     CREATED         STATUS                       PORTS     NAMES
-0097704a9c5d   hello:multi   "/server"   4 seconds ago   Exited (137) 2 seconds ago             hello
-curl: (7) Failed to connect to localhost port 8080 after 1 ms: Couldn't connect to server</pre>
+CONTAINER ID   IMAGE              COMMAND       CREATED          STATUS                       PORTS     NAMES
+6f7434adc543   python:3.13-slim   "sleep 600"   10 seconds ago   Exited (137) 3 seconds ago             hello</pre>
   </details>
   <p>Exit code 137 means "killed". It stays dead: no restart, no warning. Wait a minute and check again; nothing changes. Clean up:</p>
 <pre class="cmd">docker rm hello</pre>
-  <p class="note">No <code>hello:multi</code> yet? Any image that keeps running shows the same thing, for example <code>docker run -d --name hello python:3.13-slim sleep 600</code>.</p>
 </li>
 
 <li>
