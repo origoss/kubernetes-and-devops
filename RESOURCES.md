@@ -113,6 +113,11 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
 - [Docs: Cluster Architecture (Kubernetes)](https://kubernetes.io/docs/concepts/architecture/). Use for: control plane vs worker nodes.
 - [Docs: Kubernetes Components (Kubernetes)](https://kubernetes.io/docs/concepts/overview/components/). Use for: what each component does.
 - [Docs: Organizing cluster access using kubeconfig files (Kubernetes)](https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/). Use for: clusters, users, contexts, KUBECONFIG.
+- [Docs: Init Containers (Kubernetes)](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/). Use for: containers that run to completion before the app starts.
+- [Docs: Services, Load Balancing, and Networking (Kubernetes)](https://kubernetes.io/docs/concepts/services-networking/). Use for: the network model (every Pod reaches every Pod), CNI.
+- [Docs: Owners and Dependents (Kubernetes)](https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/). Use for: ownerReferences, garbage collection.
+- [Docs: EndpointSlices (Kubernetes)](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/). Use for: the Pods behind a Service.
+- [Docs: DNS for Services and Pods (Kubernetes)](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/). Use for: service names, `<service>.<namespace>.svc.cluster.local`.
 - [Article: The Twelve-Factor App, Config](https://12factor.net/config). Use for: why the port comes from an environment variable.
 - [Site: Retrieval Practice (Agarwal & Bain)](https://www.retrievalpractice.org/). Use for: why the recap quiz is spaced.
 

@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello        # the Pods this Deployment counts as its own
+  template:             # the Pod to stamp out, replicas times
+    metadata:
+      labels:
+        app: hello      # must match the selector above
+    spec:
+      containers:
+        - name: hello
+          image: hello:0.1.0
+          ports:
+            - containerPort: 8080

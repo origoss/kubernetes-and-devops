@@ -15,7 +15,7 @@ Open the lessons in a browser. Each one is a short, self-contained HTML page wit
 | 04 | [Advanced Dockerfile: multi-stage, EXPOSE, VOLUME, USER](lessons/s1-04-advanced-dockerfile.html) | 20' | after |
 | 05 | [Why orchestration + kind](lessons/s1-05-why-orchestration.html) | 20' | before |
 | 06 | [Looking with kubectl](lessons/s1-06-looking-with-kubectl.html) | 15' | after |
-| 07 | [Pod → Deployment → Service](lessons/s1-07-pod-deployment-service.html) | 15' | after |
+| 07 | [Pod → Deployment → Service](lessons/s1-07-pod-deployment-service.html) | 40' | after |
 | 08 | [Write the YAML, update and roll back](lessons/s1-08-write-the-yaml.html) | 20' | after |
 | 09 | [Requests & limits](lessons/s1-09-requests-limits.html) | 10' | after |
 | 10 | [Recap quiz](lessons/s1-10-recap-quiz.html) | ~12' | before session 2 |

@@ -17,17 +17,17 @@
   <strong>Your win:</strong> <code>k8s/deployment.yaml</code> and <code>k8s/service.yaml</code>, written by hand for your own server, applied, scaled, self-healing, updated to a new version and rolled back, and committed to your repo.
 </div>
 
-<p class="meta">Before this: lesson 07, so your <code>hello</code> Deployment and Service are running, created by commands.</p>
+<p class="meta">Before this: lesson 07, so your <code>hello</code> Deployment and Service are running, created from the example files.</p>
 
 <h2>Commands forget, files remember</h2>
 
-<p>In lesson 07 you <em>told</em> the cluster what to do, one command at a time. That works, but the only record of what you want now lives inside the cluster. Nobody can review it, and you cannot rebuild it on a fresh cluster without remembering every flag.</p>
+<p>In lesson 07 you applied example files from the course repository. Now your server gets manifests of its own, in its own repository, next to its code. And you will see what happens to changes made by command instead, such as <code>kubectl scale</code>: the cluster changes, but no file records it. Nobody can review it, and you cannot rebuild it on a fresh cluster without remembering every flag.</p>
 
 <p>The declarative way is to write the desired state into files and let <code>kubectl apply</code> make the cluster match them. Run it once and it creates. Run it again with an edited file and it changes only what differs. Run it with nothing changed and it does nothing. The files go into git next to your code, so every change is reviewed and dated.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
 
 <h2>Four fields, every time</h2>
 
-<p>Every Kubernetes object you write has the same skeleton:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
+<p>Every Kubernetes object you write has the skeleton you read in lesson 07:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
 
 <ul>
   <li><code>apiVersion</code> and <code>kind</code>: which type of object. A Deployment is <code>apps/v1</code>, a Service is plain <code>v1</code>.</li>
@@ -39,7 +39,7 @@
 
 <h2>Labels hold it all together</h2>
 
-<p>Objects find each other by <strong>labels</strong>, not by name. A Deployment has a <code>selector</code> that says "my Pods are the ones labelled <code>app: hello</code>", and a Pod <code>template</code> that stamps that same label on every Pod it creates. If the two disagree, the Deployment would create Pods it can never count as its own, and keep creating more. So the API refuses such a Deployment outright.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup></p>
+<p>Lesson 07 showed it: objects find each other by <strong>labels</strong>, not by name. A Deployment has a <code>selector</code> that says "my Pods are the ones labelled <code>app: hello</code>", and a Pod <code>template</code> that stamps that same label on every Pod it creates. If the two disagree, the Deployment would create Pods it can never count as its own, and keep creating more. So the API refuses such a Deployment outright.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup></p>
 
 <p>The Service uses the same trick: its <code>selector</code> picks every Pod labelled <code>app: hello</code>, whoever made it. Here a mismatch is <em>not</em> refused. You simply get a Service with nobody behind it.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/service/">[3]</a></sup></p>
 
@@ -49,7 +49,7 @@
 
 <ol class="steps">
 <li>
-  <p>Delete the objects you made by command in lesson 07, so the files start from a clean slate.</p>
+  <p>Delete the Deployment and Service from lesson 07, so your own files start from a clean slate.</p>
 <pre class="cmd">kubectl delete deployment,service hello</pre>
   <details class="expect"><summary>Expected output</summary>
 <pre>deployment.apps "hello" deleted from default namespace
