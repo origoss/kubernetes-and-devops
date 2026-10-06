@@ -25,23 +25,9 @@
 
 <p>The declarative way is to write the desired state into files and let <code>kubectl apply</code> make the cluster match them. Run it once and it creates. Run it again with an edited file and it changes only what differs. Run it with nothing changed and it does nothing. The files go into git next to your code, so every change is reviewed and dated.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
 
-<h2>Four fields, every time</h2>
+<h2>What you already know</h2>
 
-<p>Every Kubernetes object you write has the skeleton you read in lesson 07:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
-
-<ul>
-  <li><code>apiVersion</code> and <code>kind</code>: which type of object. A Deployment is <code>apps/v1</code>, a Service is plain <code>v1</code>.</li>
-  <li><code>metadata</code>: at least a <code>name</code>, usually some <code>labels</code>.</li>
-  <li><code>spec</code>: the state you want.</li>
-</ul>
-
-<p>There is a fifth, <code>status</code>, but you never write it. The cluster fills it in with the state it has actually reached.</p>
-
-<h2>Labels hold it all together</h2>
-
-<p>Lesson 07 showed it: objects find each other by <strong>labels</strong>, not by name. A Deployment has a <code>selector</code> that says "my Pods are the ones labelled <code>app: hello</code>", and a Pod <code>template</code> that stamps that same label on every Pod it creates. If the two disagree, the Deployment would create Pods it can never count as its own, and keep creating more. So the API refuses such a Deployment outright.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup></p>
-
-<p>The Service uses the same trick: its <code>selector</code> picks every Pod labelled <code>app: hello</code>, whoever made it. Here a mismatch is <em>not</em> refused. You simply get a Service with nobody behind it.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/service/">[3]</a></sup></p>
+<p>Lesson 07 gave you the pieces: every object has <code>apiVersion</code>, <code>kind</code>, <code>metadata</code> and <code>spec</code>, and the cluster adds <code>status</code>.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup> Deployments and Services find their Pods by <strong>labels</strong>. One rule you have not met yet: a Deployment whose <code>selector</code> does not match its own template's labels would create Pods it can never count, and keep creating more. So the API refuses it outright.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup> A Service with a selector that matches nothing is accepted, as you saw, and simply has no endpoints.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/service/">[3]</a></sup></p>
 
 <h2>Do it</h2>
 
@@ -304,12 +290,12 @@ deployment.apps/hello rolled back</pre>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
-<fieldset class="quiz-q" data-answer="0">
-  <legend><span class="kind">Predict the output</span>A Service's selector says <code>app: helo</code> (typo); your Pods say <code>app: hello</code>. What happens?</legend>
-  <button class="opt" data-why="Right. No events, no errors. describe shows an empty Endpoints line, and port-forward hangs for a minute, then says: error: timed out waiting for the condition.">Service is created, has no endpoints, and port-forward times out</button>
-  <button class="opt" data-why="No. Unlike the Deployment check, the API cannot know which labels you meant. Any selector is valid.">apply refuses the Service because no Pod carries that label</button>
-  <button class="opt" data-why="No. Selectors are exact. One wrong letter matches nothing.">Service still finds the Pods, since the label is close</button>
-  <button class="opt" data-why="No. A Service never touches Pods. It only selects them.">Service relabels the running Pods to app: helo for you</button>
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You updated the image from <code>0.1.0</code> to <code>0.1.1</code> and the rollout finished. What does <code>kubectl get rs -l app=hello</code> show?</legend>
+  <button class="opt" data-why="No. The Deployment does not reuse the old ReplicaSet for a new template; it makes a new one.">One ReplicaSet, with its image changed in place to 0.1.1</button>
+  <button class="opt" data-why="No. The old ReplicaSet is kept on purpose, so a rollback has something to scale back up.">One new ReplicaSet; the old one was deleted after rollout</button>
+  <button class="opt" data-why="Right. The new one runs all Pods; the old one is kept at 0, ready for kubectl rollout undo.">Two ReplicaSets: the new one with 3, old with 0</button>
+  <button class="opt" data-why="No. A finished rollout leaves no Pods on the old version. The old ReplicaSet is scaled to 0.">Two ReplicaSets, each running half of the Pods for safety</button>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
