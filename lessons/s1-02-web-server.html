@@ -43,10 +43,10 @@
     <tr><td>III. Config</td><td>Store config in the environment</td><td><code>PORT</code>, this lesson</td></tr>
     <tr><td>IV. Backing services</td><td>Treat databases, queues… as attached resources</td><td>none yet; homework 1 adds Redis, found through <code>REDIS_URL</code></td></tr>
     <tr><td>V. Build, release, run</td><td>Strictly separate build and run stages</td><td>build the image once, tag <code>0.1.0</code>, run it anywhere (lessons 04 and 06); publish it and automate it in the session 2 pipeline</td></tr>
-    <tr><td>VI. Processes</td><td>Run as stateless, share-nothing processes</td><td>why three replicas just work (lesson 08)</td></tr>
+    <tr><td>VI. Processes</td><td>Run as stateless, share-nothing processes</td><td>why three replicas just work (lesson 07)</td></tr>
     <tr><td>VII. Port binding</td><td>Export services by binding to a port</td><td><code>ListenAndServe</code>, no separate web server in front</td></tr>
-    <tr><td>VIII. Concurrency</td><td>Scale out by running more processes</td><td><code>replicas: 3</code> instead of a bigger machine (lesson 08)</td></tr>
-    <tr><td>IX. Disposability</td><td>Start fast, shut down gracefully on SIGTERM</td><td>Kubernetes kills and replaces pods at will (lessons 07–08)</td></tr>
+    <tr><td>VIII. Concurrency</td><td>Scale out by running more processes</td><td><code>replicas: 3</code> instead of a bigger machine (lesson 07)</td></tr>
+    <tr><td>IX. Disposability</td><td>Start fast, shut down gracefully on SIGTERM</td><td>Kubernetes kills and replaces pods at will (lesson 07)</td></tr>
     <tr><td>X. Dev/prod parity</td><td>Keep development and production alike</td><td>the same image on your laptop, in kind and in CI; kind is real Kubernetes</td></tr>
     <tr><td>XI. Logs</td><td>Treat logs as event streams</td><td>write to the output stream; <code>docker logs</code>, <code>kubectl logs</code>, and Loki in session 3</td></tr>
     <tr><td>XII. Admin processes</td><td>Run admin tasks as one-off processes</td><td>a one-off <code>kubectl run</code> pod rather than logging into a server (homework 1)</td></tr>
@@ -55,7 +55,7 @@
 
 <p>Two factors are worth a closer look, because Kubernetes leans on them hardest. <strong>Processes (VI):</strong> a twelve-factor process keeps nothing it needs in memory or on local disk between requests.<sup class="cite"><a href="https://12factor.net/processes">[9]</a></sup> That is what lets Kubernetes route any request to any replica, and throw a replica away without losing anything. <strong>Logs (XI):</strong> an app "should not attempt to write to or manage logfiles"; it writes its event stream, unbuffered, to stdout.<sup class="cite"><a href="https://12factor.net/logs">[10]</a></sup> Collecting that stream is the platform's job. Our server's single log line goes through Go's default logger, which writes to standard error.<sup class="cite"><a href="https://pkg.go.dev/log">[11]</a></sup> Docker and Kubernetes capture both output streams, so that is fine.</p>
 
-<p class="note">Our server is not perfect yet. It does not catch <code>SIGTERM</code>, so when Kubernetes stops it, requests still in progress are cut off instead of finishing. Disposability (IX) asks for a graceful shutdown.<sup class="cite"><a href="https://12factor.net/disposability">[12]</a></sup> You will see the symptom in lesson 08.</p>
+<p class="note">Our server is not perfect yet. It does not catch <code>SIGTERM</code>, so when Kubernetes stops it, requests still in progress are cut off instead of finishing. Disposability (IX) asks for a graceful shutdown.<sup class="cite"><a href="https://12factor.net/disposability">[12]</a></sup> You will see the symptom in lesson 07.</p>
 
 <p class="note">Want to use another language? You may, as long as your server listens on <code>$PORT</code> (default 8080) and answers <code>GET /</code> and <code>GET /healthz</code>. But every lesson shows Go, and on the day the instructor can only support Go.</p>
 

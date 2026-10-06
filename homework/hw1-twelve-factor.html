@@ -67,7 +67,7 @@
     <tr><td><code>Dockerfile</code></td><td>multi-stage, distroless, non-root, as in <a href="../lessons/s1-04-advanced-dockerfile.html">lesson 04</a>, now with <code>go.sum</code> and a cached <code>go mod download</code> step</td></tr>
     <tr><td><code>k8s/redis.yaml</code></td><td>a Deployment and a Service, both named <code>redis</code>, image <code>redis:8-alpine</code>, port 6379</td></tr>
     <tr><td><code>k8s/deployment.yaml</code></td><td>Deployment <code>hello</code>: <strong>2 replicas</strong>, image <code>hello:0.2.0</code>, <code>REDIS_URL</code> and <code>GREETING</code> set in <code>env</code>, startup, readiness and liveness probes on <code>/healthz</code>, requests and a memory limit</td></tr>
-    <tr><td><code>k8s/service.yaml</code></td><td>Service <code>hello</code>, port 80 → 8080, as in <a href="../lessons/s1-08-write-the-yaml.html">lesson 08</a></td></tr>
+    <tr><td><code>k8s/service.yaml</code></td><td>Service <code>hello</code>, port 80 → 8080, as in <a href="../lessons/s1-07-pod-deployment-service.html">lesson 07</a></td></tr>
     <tr><td><code>README.md</code></td><td>how to run it from a clean clone, plus a <strong>twelve-row table</strong>: for every factor, where your repository meets it, or why it does not apply</td></tr>
   </tbody>
 </table>
@@ -106,7 +106,7 @@
 <p>Stop it with <code>docker stop redis</code> to see your <code>503</code>, start it again with <code>docker start redis</code>, and remove it with <code>docker rm -f redis</code> when you are done.</p>
 
 <h3>2. Redis in the cluster</h3>
-<p><code>k8s/redis.yaml</code> holds a Deployment and a Service, with the same shape you wrote in lesson 08. Two YAML documents can share one file if you separate them with a line containing only <code>---</code>. Inside the cluster, a Service's name is also its DNS name, so your server reaches Redis at <code>redis://redis:6379/0</code>.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">[3]</a></sup> Losing the counter when the Redis pod restarts is fine for this homework.</p>
+<p><code>k8s/redis.yaml</code> holds a Deployment and a Service, with the same shape you wrote in lesson 07. Two YAML documents can share one file if you separate them with a line containing only <code>---</code>. Inside the cluster, a Service's name is also its DNS name, so your server reaches Redis at <code>redis://redis:6379/0</code>.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">[3]</a></sup> Losing the counter when the Redis pod restarts is fine for this homework.</p>
 
 <h3>3. Environment variables in a Deployment</h3>
 <p>Each container in the pod template can carry an <code>env</code> list:<sup class="cite"><a href="https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/">[4]</a></sup></p>
