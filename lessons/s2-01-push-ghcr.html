@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Push to GHCR</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 2 · CI/CD · about 10 minutes · after the session</p>
+<h1>Put your image where anyone can pull it</h1>
+
+<div class="win">
+  <strong>Your win:</strong> your image lives in your own registry on GitHub, and anyone, your Kubernetes cluster included, can pull it with one command.
+</div>
+
+<p class="meta">Before this: session 1. You built <code>hello:multi</code> in <a href="s1-04-advanced-dockerfile.html">lesson 04</a> and loaded it into kind as <code>hello:0.1.0</code> in <a href="s1-06-looking-with-kubectl.html">lesson 06</a>, and you have a GitHub account with your course repo in it.</p>
+
+<h2>What a registry is</h2>
+
+<p>In <a href="s1-01-why-containers.html">lesson 01</a> you met the <strong>registry</strong>: a server that stores images and hands them out. So far <code>hello:multi</code> exists only on your laptop. Nobody else can run it, and neither can a cluster, unless you copy it in by hand with <code>kind load</code> as in session 1. A push copies it to a registry; a pull copies it back down, onto any machine.</p>
+
+<p>GitHub runs one, the <strong>GitHub Container Registry</strong> at <code>ghcr.io</code>. It comes with the GitHub account you already have, and each image you push shows up as a <em>package</em> on your profile.<sup class="cite"><a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry">[1]</a></sup></p>
+
+<h2>Reading an image name</h2>
+
+<p>An image name is an address. Each part tells Docker where to look:<sup class="cite"><a href="https://docs.docker.com/reference/cli/docker/image/tag/">[2]</a></sup></p>
+
+<pre>ghcr.io  /  &lt;you&gt;  /  hello  :  0.1.0
+───────     ─────     ─────     ─────
+registry    namespace repository tag
+(GitHub)    (your     (the      (which
+            user)     image)    version)</pre>
+
+<p>Leave out the registry and Docker assumes Docker Hub. That is why <code>python:3.13-slim</code> worked in lesson 01. Leave out the tag and Docker assumes <code>latest</code>. The namespace must be lowercase, even if your GitHub username is not.</p>
+
+<h2>Why <code>0.1.0</code> and never <code>latest</code></h2>
+
+<p>You met this trap in <a href="s1-06-looking-with-kubectl.html">lesson 06</a>. With a registry it matters even more. <code>latest</code> is not "the newest". It is just the tag Docker picks when you give none, and it points wherever the last push put it. Kubernetes treats it specially: for an image tagged <code>:latest</code> (or untagged) the default pull policy is <code>Always</code>, so every container start goes back to the registry. For any other tag the default is <code>IfNotPresent</code>.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/containers/images/">[3]</a></sup> In kind this bites hard: an image you loaded by hand gets ignored and re-pulled, which fails if it was never pushed. kind's own docs say: don't use a <code>:latest</code> tag.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster">[4]</a></sup></p>
+
+<p>A version tag like <code>0.1.0</code> tells you what is running. It is still a <em>name</em>, though: you could push different content under it tomorrow. The only name that can never move is the <strong>digest</strong>, <code>sha256:…</code>, a hash of the content itself.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/containers/images/">[3]</a></sup></p>
+
+<h2>A token, handled like a password</h2>
+
+<p>To push, Docker must prove it is you. GHCR accepts only a <strong>personal access token (classic)</strong>; the newer fine-grained tokens do not work here. The scope <code>write:packages</code> is enough to push and pull.<sup class="cite"><a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry">[1]</a></sup> GitHub's advice is blunt: treat the token like a password.<sup class="cite"><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">[5]</a></sup></p>
+
+<p>So never type it <em>into</em> a command. Your shell saves every command line in a history file, in plain text, and anyone who reads that file later has your token. <code>docker login --password-stdin</code> reads the secret from standard input instead, which "prevents the password from ending up in the shell's history".<sup class="cite"><a href="https://docs.docker.com/reference/cli/docker/login/">[6]</a></sup> Below you paste the token into <code>read -s</code>, which keeps it in a variable without echoing it or recording it.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Put your GitHub username in a variable, in lowercase. Every command below uses it.</p>
+<pre class="cmd">GH_USER=your-github-username</pre>
+  <p class="note">A new terminal forgets the variable. Run this line again if <code>$GH_USER</code> comes out empty.</p>
+</li>
+
+<li>
+  <p>Give your image its full address. <code>docker tag</code> adds a second name; nothing is copied and nothing leaves your laptop.</p>
+<pre class="cmd">docker tag hello:multi ghcr.io/$GH_USER/hello:0.1.0</pre>
+<pre class="cmd">docker images | grep hello</pre>
+  <details class="expect"><summary>Expected output (your ID and times differ)</summary>
+<pre>hello                 0.1.0    3025392c4a53   10 hours ago   19.1MB
+hello                 multi    3025392c4a53   10 hours ago   19.1MB
+ghcr.io/&lt;you&gt;/hello   0.1.0    3025392c4a53   10 hours ago   19.1MB</pre>
+  </details>
+  <p>Same IMAGE ID on every line: one image, three names. <code>hello:0.1.0</code> is the one you made for kind in session 1.</p>
+</li>
+
+<li>
+  <p>Create the token on GitHub:<sup class="cite"><a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">[5]</a></sup></p>
+  <ul>
+    <li><strong>Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)</strong>.</li>
+    <li>Note: <code>ghcr push from laptop</code>. Expiration: 30 days is plenty.</li>
+    <li>Scopes: tick only <code>write:packages</code>. Leave <code>repo</code> and everything else unticked.</li>
+    <li>Click <strong>Generate token</strong> and copy it. GitHub shows it only once.</li>
+  </ul>
+</li>
+
+<li>
+  <p>Log in. The first command waits silently: paste the token and press Enter. Nothing appears, which is correct.</p>
+<pre class="cmd">read -s CR_PAT</pre>
+<pre class="cmd">echo $CR_PAT | docker login ghcr.io -u $GH_USER --password-stdin</pre>
+<pre class="cmd">unset CR_PAT</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>Login Succeeded</pre>
+  </details>
+  <p class="note">GitHub's own page shows <code>export CR_PAT=YOUR_TOKEN</code>. That line puts the token in your history file, which is exactly what you are avoiding. <code>read -s</code> does the same job without that leak.</p>
+</li>
+
+<li>
+  <p>Push.</p>
+<pre class="cmd">docker push ghcr.io/$GH_USER/hello:0.1.0</pre>
+  <details class="expect"><summary>Example of the shape (not real output: your layer IDs, digest and size differ)</summary>
+<pre>The push refers to repository [ghcr.io/&lt;you&gt;/hello]
+&lt;layer-id&gt;: Pushed
+&lt;layer-id&gt;: Pushed
+...
+0.1.0: digest: sha256:&lt;64 hex characters&gt; size: &lt;bytes&gt;</pre>
+  </details>
+  <p>That <code>sha256:</code> line is the digest: the one name for this exact content that can never move.</p>
+</li>
+
+<li>
+  <p>Make the package public. A new package is <strong>private by default</strong>, visible only to you.<sup class="cite"><a href="https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility">[7]</a></sup> Your cluster has no GitHub login, so it could not pull a private one.</p>
+  <ul>
+    <li>Open your profile on GitHub, go to the <strong>Packages</strong> tab and click <strong>hello</strong>.</li>
+    <li>Click <strong>Package settings</strong> (the gear icon).</li>
+    <li>Under <strong>Danger Zone</strong>, click <strong>Change visibility</strong> and select <strong>Public</strong>.</li>
+    <li>Type <code>hello</code> to confirm, then click <strong>I understand the consequences, change package visibility</strong>.</li>
+  </ul>
+  <p class="warn">This is one-way: once a package is public, you cannot make it private again.<sup class="cite"><a href="https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility">[7]</a></sup> That is fine for this course; your code is public anyway.</p>
+</li>
+
+<li>
+  <p>Prove it. Log out, so Docker pulls as a stranger would. Remove your local copy of the name, then pull it back from GitHub.</p>
+<pre class="cmd">docker logout ghcr.io</pre>
+<pre class="cmd">docker rmi ghcr.io/$GH_USER/hello:0.1.0</pre>
+<pre class="cmd">docker pull ghcr.io/$GH_USER/hello:0.1.0</pre>
+  <details class="expect"><summary>Expected output (digest shortened)</summary>
+<pre>Removing login credentials for ghcr.io
+Untagged: ghcr.io/&lt;you&gt;/hello:0.1.0
+0.1.0: Pulling from &lt;you&gt;/hello
+Digest: sha256:…
+Status: Downloaded newer image for ghcr.io/&lt;you&gt;/hello:0.1.0
+ghcr.io/&lt;you&gt;/hello:0.1.0</pre>
+  </details>
+  <p><code>rmi</code> only says <code>Untagged</code>: <code>hello:multi</code> still names the same image, so the layers stay on disk. The pull still goes to GHCR, and it succeeds without a login. Anyone can now run your server.</p>
+  <p class="note">Got <code>error from registry: denied</code>? The package is still private, or the name has a typo. GHCR gives the same answer for both, so check the spelling first.</p>
+</li>
+
+<li>
+  <p><em>Optional:</em> link the package to your repository, so its GitHub page shows your README and source. Add one line to the run stage of your <code>Dockerfile</code>, right after its <code>FROM</code>:<sup class="cite"><a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry">[1]</a></sup></p>
+<pre class="file">LABEL org.opencontainers.image.source=https://github.com/&lt;you&gt;/&lt;your-repo&gt;</pre>
+  <p>Then rebuild <code>hello:multi</code>, tag it again and push again. The label is a new layer of metadata, so the image gets a new ID. You can also link the package by hand on its settings page.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>You pushed but skipped step 6. A classmate who is not logged in runs <code>docker pull ghcr.io/&lt;you&gt;/hello:0.1.0</code>. What do they see?</legend>
+  <button class="opt" data-why="No. A new package is private by default. Only you can see it until you change that.">The image downloads, since every GHCR package starts public</button>
+  <button class="opt" data-why="Right. Private packages need a login. Without one GHCR answers 'denied', the same as for a name that does not exist.">error from registry: denied, since the package is private</button>
+  <button class="opt" data-why="No. docker pull never prompts. Logging in is a separate command, docker login.">A prompt asking them for their GitHub username first</button>
+  <button class="opt" data-why="No. A registry either serves the real image or refuses. It has no placeholders.">An empty placeholder image with no layers in it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>What does <code>docker tag hello:multi ghcr.io/&lt;you&gt;/hello:0.1.0</code> do?</legend>
+  <button class="opt" data-why="No. tag is purely local. Only docker push talks to the registry.">Docker uploads a copy of the image to GitHub's registry</button>
+  <button class="opt" data-why="No. Nothing is built. The IMAGE ID stays the same on both lines.">Docker rebuilds the image so it carries the new name</button>
+  <button class="opt" data-why="Right. One image, two names, same IMAGE ID. The name just says where it would be pushed.">A second name now points at the same local image</button>
+  <button class="opt" data-why="No. The old name stays. docker images lists both.">The old name hello:multi is renamed and no longer exists</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span><code>hello:multi</code> still exists. You run <code>docker rmi ghcr.io/&lt;you&gt;/hello:0.1.0</code>. What happens?</legend>
+  <button class="opt" data-why="No. The layers are still in use by hello:multi, so Docker only removes the name.">Deleted, and the layers are removed from your disk</button>
+  <button class="opt" data-why="No. You can remove any name of an image. The image itself goes when its last name goes.">An error, because you must delete hello:multi tag first</button>
+  <button class="opt" data-why="No. docker rmi is local. Deleting a package happens on GitHub, with its own permission.">A request to GHCR, which deletes the pushed package</button>
+  <button class="opt" data-why="Right. Docker prints Untagged. Another name still points at the image, so it stays.">Only Untagged, because hello:multi still points at the image</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why does this course tag <code>0.1.0</code> and never <code>latest</code>?</legend>
+  <button class="opt" data-why="Right. :latest defaults to imagePullPolicy Always, so the cluster pulls on every start. In kind that skips the image you loaded.">latest makes Kubernetes pull every time, ignoring loaded images</button>
+  <button class="opt" data-why="No. GitHub's own examples push :latest. It is allowed, just a bad idea.">GHCR rejects pushes of any image tagged as latest</button>
+  <button class="opt" data-why="No. Nothing moves it automatically. latest points wherever the last push of :latest put it.">latest is automatically moved to the newest pushed image</button>
+  <button class="opt" data-why="No. A tag is only a name. It changes nothing about the content.">Version tags make images smaller and faster to pull</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>What is the difference between <code>hello:0.1.0</code> and <code>hello@sha256:…</code>?</legend>
+  <button class="opt" data-why="Backwards. The digest is a hash of the content, so it cannot point anywhere else.">The digest can be moved; the tag always names identical content</button>
+  <button class="opt" data-why="No. They may point at the same image today, but only one of them is guaranteed to tomorrow.">Both are the same thing, just written in two different notations</button>
+  <button class="opt" data-why="Right. A tag is a movable label. A digest is computed from the content, so it always means exactly those bytes.">The tag can be moved; the digest always names identical content</button>
+  <button class="opt" data-why="No. Registries resolve both. Kubernetes accepts a digest in the image field.">The tag is checked by GHCR; the digest only works locally</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>Why <code>read -s</code> plus <code>--password-stdin</code>, and not the token typed straight into the command?</legend>
+  <button class="opt" data-why="No. GHCR never sees how you typed it. Docker sends the same login either way.">GHCR refuses any token passed as a command argument</button>
+  <button class="opt" data-why="Right. Your shell saves command lines in a plain-text history file. A token on stdin never gets written there.">A token typed into commands lands in shell history</button>
+  <button class="opt" data-why="No. Speed is the same. The difference is where the secret leaves a trace.">Reading it from stdin makes the login much faster</button>
+  <button class="opt" data-why="No. Docker stores the credential the same way however it arrived.">Docker only encrypts tokens that arrive through standard input</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry">GitHub: Working with the Container registry</a>. It is the primary source for every step above, including the token rules and the labels that link a package to a repo. About ten minutes.
+</div>
+
+<p class="ask">Push failing, or a step on GitHub looks different from this page? Ask your instructor, or ask in the course channel. GitHub moves buttons around; questions get you past that fastest.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry">GitHub: Working with the Container registry</a> ·
+[2] <a href="https://docs.docker.com/reference/cli/docker/image/tag/">Docker: docker image tag</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/containers/images/">Kubernetes: Images</a> ·
+[4] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster">kind: Quick Start, loading an image</a> ·
+[5] <a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens">GitHub: Managing personal access tokens</a> ·
+[6] <a href="https://docs.docker.com/reference/cli/docker/login/">Docker: docker login</a> ·
+[7] <a href="https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility">GitHub: Package access control and visibility</a>.
+Commands verified 2026-10-06 on Docker 28.3 (macOS): tag, images, rmi, logout and anonymous pull from GHCR (tag and images re-checked the same day). Login, push and the visibility steps follow GitHub's docs.</p>
+
+<nav class="pager"><a href="s1-10-recap-quiz.html">← previous: session 1 recap quiz</a><span class="off">next: coming in session 2</span></nav>
+
+</main>
+</body>
+</html>

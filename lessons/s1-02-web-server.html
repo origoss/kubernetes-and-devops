@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Web Server</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Containerization · about 15 minutes · read before the session</p>
+<h1>Your own web server</h1>
+
+<div class="win">
+  <strong>Your win:</strong> your own server answers on <code>/</code> and <code>/healthz</code>, on whatever port you give it in <code>PORT</code>, and its code is in your own GitHub repo.
+</div>
+
+<p class="meta">Before this: the pre-flight check passed, so you have Go 1.27, git and a GitHub account.</p>
+
+<h2>The server you will ship</h2>
+
+<p>This small server is what you put in a container, push to a registry and run on Kubernetes for the rest of the course. It is 20 lines of Go and uses only the standard library.<sup class="cite"><a href="https://pkg.go.dev/net/http">[1]</a></sup></p>
+
+<p>It has two endpoints. <code>/</code> is the "real" app, for people. <code>/healthz</code> is for machines: it answers <code>ok</code> when the process is alive. Later, Kubernetes asks exactly this question over and over, and restarts or stops routing to your container when it gets no answer.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">[2]</a></sup></p>
+
+<p>Patterns like <code>"GET /healthz"</code> name the HTTP method and the path. The standard router understands them since Go 1.22; any other method gets <code>405 Method Not Allowed</code>.<sup class="cite"><a href="https://go.dev/blog/routing-enhancements">[3]</a></sup> The pattern <code>"GET /"</code> ends in a slash, so it matches every path no other pattern claims.</p>
+
+<h2>Configuration from the environment</h2>
+
+<p>The server reads its port from the <code>PORT</code> environment variable and falls back to 8080.<sup class="cite"><a href="https://pkg.go.dev/os#Getenv">[4]</a></sup> This is the twelve-factor rule: <em>store config in the environment</em>, not in the code.<sup class="cite"><a href="https://12factor.net/config">[5]</a></sup> You build the program once, and every place that runs it (your laptop, a container, a cluster) sets what differs from outside, without a rebuild. You will use exactly this with <code>docker run -e PORT=…</code> in lesson 03.</p>
+
+<h2>The twelve-factor app</h2>
+
+<p>That config rule is one of twelve. <em>The Twelve-Factor App</em> was written by Adam Wiggins in 2011 and last updated in 2017. It distils what the people behind the Heroku platform learned from running "hundreds of thousands of apps".<sup class="cite"><a href="https://12factor.net/">[8]</a></sup> It predates Kubernetes, yet reads like a description of what Kubernetes expects from you. Here are the twelve, and where you meet each one in this course:</p>
+
+<table>
+  <thead><tr><th>Factor</th><th>The rule</th><th>In this course</th></tr></thead>
+  <tbody>
+    <tr><td>I. Codebase</td><td>One codebase in version control, many deploys</td><td>your one <code>hello</code> repo runs on your laptop, in kind and in CI</td></tr>
+    <tr><td>II. Dependencies</td><td>Declare and isolate dependencies explicitly</td><td><code>go.mod</code>; the image bundles everything (lessons 03–04)</td></tr>
+    <tr><td>III. Config</td><td>Store config in the environment</td><td><code>PORT</code>, this lesson</td></tr>
+    <tr><td>IV. Backing services</td><td>Treat databases, queues… as attached resources</td><td>not used: our server has none</td></tr>
+    <tr><td>V. Build, release, run</td><td>Strictly separate build and run stages</td><td>build the image once, tag <code>0.1.0</code>, run it anywhere (lesson 04); publish it and automate it in the session 2 pipeline</td></tr>
+    <tr><td>VI. Processes</td><td>Run as stateless, share-nothing processes</td><td>why three replicas just work (lesson 08)</td></tr>
+    <tr><td>VII. Port binding</td><td>Export services by binding to a port</td><td><code>ListenAndServe</code>, no separate web server in front</td></tr>
+    <tr><td>VIII. Concurrency</td><td>Scale out by running more processes</td><td><code>replicas: 3</code> instead of a bigger machine (lesson 08)</td></tr>
+    <tr><td>IX. Disposability</td><td>Start fast, shut down gracefully on SIGTERM</td><td>Kubernetes kills and replaces pods at will (lessons 07–08)</td></tr>
+    <tr><td>X. Dev/prod parity</td><td>Keep development and production alike</td><td>the same image on your laptop, in kind and in CI; kind is real Kubernetes</td></tr>
+    <tr><td>XI. Logs</td><td>Treat logs as event streams</td><td>write to the output stream; <code>docker logs</code>, <code>kubectl logs</code>, and Loki in session 3</td></tr>
+    <tr><td>XII. Admin processes</td><td>Run admin tasks as one-off processes</td><td>a one-off <code>kubectl run</code> pod rather than logging into a server</td></tr>
+  </tbody>
+</table>
+
+<p>Two factors are worth a closer look, because Kubernetes leans on them hardest. <strong>Processes (VI):</strong> a twelve-factor process keeps nothing it needs in memory or on local disk between requests.<sup class="cite"><a href="https://12factor.net/processes">[9]</a></sup> That is what lets Kubernetes route any request to any replica, and throw a replica away without losing anything. <strong>Logs (XI):</strong> an app "should not attempt to write to or manage logfiles"; it writes its event stream, unbuffered, to stdout.<sup class="cite"><a href="https://12factor.net/logs">[10]</a></sup> Collecting that stream is the platform's job. Our server's single log line goes through Go's default logger, which writes to standard error.<sup class="cite"><a href="https://pkg.go.dev/log">[11]</a></sup> Docker and Kubernetes capture both output streams, so that is fine.</p>
+
+<p class="note">Our server is not perfect yet. It does not catch <code>SIGTERM</code>, so when Kubernetes stops it, requests still in progress are cut off instead of finishing. Disposability (IX) asks for a graceful shutdown.<sup class="cite"><a href="https://12factor.net/disposability">[12]</a></sup> You will see the symptom in lesson 08.</p>
+
+<p class="note">Want to use another language? You may, as long as your server listens on <code>$PORT</code> (default 8080) and answers <code>GET /</code> and <code>GET /healthz</code>. But every lesson shows Go, and on the day the instructor can only support Go.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Make a folder and a Go module. The second command pins the Go version to 1.27, which matches the <code>golang:1.27</code> image you build with in lesson 03.<sup class="cite"><a href="https://go.dev/doc/tutorial/getting-started">[6]</a></sup></p>
+<pre class="cmd">mkdir hello &amp;&amp; cd hello</pre>
+<pre class="cmd">go mod init hello</pre>
+<pre class="cmd">go mod edit -go=1.27</pre>
+  <p class="filename">go.mod (now)</p>
+<pre class="file">module hello
+
+go 1.27</pre>
+</li>
+
+<li>
+  <p>Save this as <code>main.go</code>. Read it first: every line maps to a sentence above.</p>
+  <p class="filename">main.go</p>
+<pre class="file">package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	http.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "hello from my container")
+	})
+	http.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "ok")
+	})
+	log.Printf("listening on :%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
+}</pre>
+</li>
+
+<li>
+  <p>Run it. It keeps running in this terminal.</p>
+<pre class="cmd">go run .</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>2026/10/06 00:26:17 listening on :8080</pre>
+  </details>
+</li>
+
+<li>
+  <p>In a <em>second</em> terminal, ask it both questions:</p>
+<pre class="cmd">curl localhost:8080/</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>hello from my container
+ok</pre>
+  </details>
+</li>
+
+<li>
+  <p>Stop the server with <kbd>Ctrl</kbd>+<kbd>C</kbd> in the first terminal. Start it again on another port, set from outside:</p>
+<pre class="cmd">PORT=9090 go run .</pre>
+<pre class="cmd">curl localhost:9090/healthz</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>2026/10/06 00:26:27 listening on :9090
+ok</pre>
+  </details>
+  <p>Same code, different behaviour, no edit. Stop it again with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+</li>
+
+<li>
+  <p>Put it on GitHub. On github.com, create a new <strong>public</strong> repository called <code>hello</code>, with no README. Then, inside your <code>hello</code> folder (replace <code>&lt;you&gt;</code> with your GitHub username):</p>
+<pre class="cmd">git init -b main
+git add go.mod main.go
+git commit -m "Add hello web server"
+git remote add origin https://github.com/&lt;you&gt;/hello.git
+git push -u origin main</pre>
+  <p class="note">GitHub asks for a token, not your password, when you push over HTTPS. If you already use SSH keys, use the SSH remote URL instead. Every later lesson adds files to this repo.</p>
+</li>
+
+<li>
+  <p>Let your instructor review your work. In your repository on github.com, open <strong>Settings → Collaborators → Add people</strong> and enter your instructor's GitHub username, <code>jagyugyaerik</code>.<sup class="cite"><a href="https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-access-to-your-personal-repositories/inviting-collaborators-to-a-personal-repository">[7]</a></sup> From now on, you submit every exercise as a pull request and request your instructor as the reviewer.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>You run <code>go run .</code> with no <code>PORT</code> set. What does the log line say?</legend>
+  <button class="opt" data-why="No. The server never picks a random port; the code has a fallback.">listening on a random free port</button>
+  <button class="opt" data-why="Right. os.Getenv returns an empty string, so the fallback 8080 is used.">listening on :8080, the coded fallback</button>
+  <button class="opt" data-why="No. An unset variable is not an error here. Getenv just returns an empty string.">an error, because PORT is missing</button>
+  <button class="opt" data-why="No. 80 needs special privileges and is never mentioned in the code.">listening on :80, the HTTP default</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>The server runs on 8080. What does <code>curl -X POST localhost:8080/healthz</code> return?</legend>
+  <button class="opt" data-why="No. The pattern is GET /healthz, so a POST does not reach that handler.">ok, because the path matches /healthz exactly</button>
+  <button class="opt" data-why="No. GET / does not catch it either: it only matches GET requests.">hello from my container, from the catch-all</button>
+  <button class="opt" data-why="No. The path exists; only the method is wrong. That gets its own status.">404 Not Found, because nothing handles it</button>
+  <button class="opt" data-why="Right. Since Go 1.22 the router knows the path exists for GET (and HEAD) only, and answers 405 with an Allow: GET, HEAD header.">405 Method Not Allowed, from the router</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>What does <code>curl localhost:8080/nope</code> return?</legend>
+  <button class="opt" data-why="Right. A pattern ending in / matches every path below it, so GET / is the catch-all.">hello from my container</button>
+  <button class="opt" data-why="No. Nothing here returns 404: GET / catches every GET path.">404 page not found</button>
+  <button class="opt" data-why="No. The method is GET, which is allowed.">405 Method Not Allowed</button>
+  <button class="opt" data-why="No. /healthz is only matched by exactly that path.">ok from the healthz</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You start <code>PORT=9090 go run .</code> and then run <code>curl localhost:8080/</code>. What happens?</legend>
+  <button class="opt" data-why="No. The server listens only on the port it read from PORT.">The server answers on both ports at once</button>
+  <button class="opt" data-why="No. 9090 is a valid port, and the log confirms the server started.">The server refuses to start on port 9090</button>
+  <button class="opt" data-why="Right. Nothing listens on 8080, so curl reports: Failed to connect to localhost port 8080.">curl fails, because nothing listens on port 8080</button>
+  <button class="opt" data-why="No. Nothing forwards between ports; that is something Docker does with -p, in lesson 03.">curl is forwarded to port 9090 and succeeds</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>Why does the server read its port from the environment?</legend>
+  <button class="opt" data-why="No. Environment variables are no faster to read; the gain is flexibility.">Reading the environment is faster than reading a file</button>
+  <button class="opt" data-why="Right. Twelve-factor config: one build, and each place that runs it sets what differs.">The same build runs anywhere with its own settings</button>
+  <button class="opt" data-why="No. Go accepts any port in code. The point is not having to change code.">Go cannot listen on a port written in code</button>
+  <button class="opt" data-why="No. Kubernetes does not demand a PORT variable. It is our own convention.">Kubernetes requires every server to read a PORT variable</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>Why should your server write logs to its output stream instead of to log files?</legend>
+  <button class="opt" data-why="No. Speed is not the argument. Ownership is: the app produces events, and the platform decides where they go.">Writing files is slower, and logs must never slow requests</button>
+  <button class="opt" data-why="No. Containers can write files. Those files just disappear when the container is replaced.">Kubernetes forbids containers from writing any files to their disk</button>
+  <button class="opt" data-why="Right. docker logs and kubectl logs read the stream, and a replaced container takes its local files with it.">The platform collects the stream; files vanish with the container</button>
+  <button class="opt" data-why="No. Compression has nothing to do with it.">Log files cannot be compressed, so they fill disks quickly</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Which factor makes it safe to run three replicas of your server behind one Service?</legend>
+  <button class="opt" data-why="No. All replicas use the same config. That is the point of building once.">Config: every replica reads a different PORT value</button>
+  <button class="opt" data-why="No. Factor I says one codebase, many deploys.">Codebase: each replica needs its own separate repository</button>
+  <button class="opt" data-why="No. Twelve-factor apps write logs to a stream and never share log files.">Logs: replicas coordinate through a shared log file</button>
+  <button class="opt" data-why="Right. No replica keeps state the others need, so any of them can answer any request.">Processes: each copy is stateless and shares nothing</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://gobyexample.com/http-server">Go by Example: HTTP Server</a>. Five minutes, and it explains the handler functions you just used line by line.
+</div>
+
+<p class="ask">Something unclear, or new to Go? Ask your instructor, or ask in the course channel. Bring your questions to the session.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://pkg.go.dev/net/http">Go: net/http</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">Kubernetes: Liveness, readiness and startup probes</a> ·
+[3] <a href="https://go.dev/blog/routing-enhancements">Go blog: Routing enhancements for Go 1.22</a> ·
+[4] <a href="https://pkg.go.dev/os#Getenv">Go: os.Getenv</a> ·
+[5] <a href="https://12factor.net/config">The Twelve-Factor App: Config</a> ·
+[6] <a href="https://go.dev/doc/tutorial/getting-started">Go: Get started</a> ·
+[7] <a href="https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-access-to-your-personal-repositories/inviting-collaborators-to-a-personal-repository">GitHub: Inviting collaborators</a> ·
+[8] <a href="https://12factor.net/">The Twelve-Factor App</a> ·
+[9] <a href="https://12factor.net/processes">Twelve-Factor: Processes</a> ·
+[10] <a href="https://12factor.net/logs">Twelve-Factor: Logs</a> ·
+[11] <a href="https://pkg.go.dev/log">Go: log</a> ·
+[12] <a href="https://12factor.net/disposability">Twelve-Factor: Disposability</a>.
+Commands verified 2026-10-06 on Go 1.27.0 (auto-downloaded toolchain), curl, macOS. The GitHub push and collaborator invite (steps 6–7) were not run.</p>
+
+<nav class="pager"><a href="s1-01-why-containers.html">← previous: why containers?</a><a href="s1-03-first-dockerfile.html">next: your first Dockerfile →</a></nav>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Orchestration</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Kubernetes · about 10 minutes · read before the session</p>
+<h1>Why orchestration?</h1>
+
+<div class="win">
+  <strong>Your win:</strong> a real Kubernetes cluster is running on your laptop, and you can say in one sentence what an orchestrator is for.
+</div>
+
+<p class="meta">Before this: Docker, kind and kubectl work (the <a href="s1-00-preflight.html">pre-flight check</a>), and you have the <code>hello:multi</code> image from <a href="s1-04-advanced-dockerfile.html">lesson 04</a>.</p>
+
+<h2>Pains you have already met</h2>
+
+<p>Plain Docker runs one container on one machine, exactly when you tell it to. That is enough on a laptop. It stops being enough the moment real users depend on your server:</p>
+
+<ul>
+  <li><strong>It died, and nobody restarted it.</strong> A container that crashes at 3 a.m. stays down until a human notices.</li>
+  <li><strong>I want three copies.</strong> One copy means one crash takes the service offline. Three copies means three <code>docker run</code> commands, three names, three ports, and you keeping count.</li>
+  <li><strong>The config is baked in.</strong> A different port or setting per environment means a different command line, typed correctly every time.</li>
+  <li><strong>Which machine runs it?</strong> With five servers, someone has to pick one with free memory, and pick again when it fails.</li>
+</ul>
+
+<p>You will see the first pain for real in step 1 below. By default Docker does not restart a container at all; its default restart policy is <code>no</code>.<sup class="cite"><a href="https://docs.docker.com/reference/cli/docker/container/run/#restart">[1]</a></sup></p>
+
+<h2>What an orchestrator does</h2>
+
+<p>An orchestrator turns the question around. You stop giving orders ("start this container") and instead <strong>declare the state you want</strong>: "three copies of <code>hello:0.1.0</code>, each with 128&nbsp;MB, reachable on port 80". Kubernetes stores that as an <em>object</em>, a "record of intent". From then on the system "will constantly work to ensure that the object exists".<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[2]</a></sup></p>
+
+<p>The workers that do this are <strong>controllers</strong>. Think of a thermostat: you set the temperature you want, it measures the temperature you have, and it switches the heating on or off to close the gap. A Kubernetes controller is the same loop. It watches the cluster, compares current state with desired state, and acts.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/architecture/controller/">[3]</a></sup> A copy crashed? Current state is two, desired is three, so it starts one. No human involved.</p>
+
+<p>So, in one sentence: <strong>an orchestrator keeps the actual state of your containers matching the state you declared, across many machines.</strong></p>
+
+<h2>kind: Kubernetes nodes as containers</h2>
+
+<p>A real cluster spans several machines, called <strong>nodes</strong>. You have one laptop. kind solves this neatly: it "runs a local Kubernetes cluster by using Docker containers as 'nodes'".<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[4]</a></sup> Each node is a container that holds a whole Kubernetes machine inside it.</p>
+
+<figure>
+<svg viewBox="0 0 640 270" role="img" aria-labelledby="kindfig" style="width:100%;height:auto;font-family:var(--mono);font-size:13px">
+  <title id="kindfig">Your laptop runs Docker's Linux VM. Inside it, the container kind-control-plane is a Kubernetes node. Inside the node, containerd runs the Kubernetes components and, later, your app as containers.</title>
+  <g fill="none" stroke="currentColor" stroke-width="1.2">
+    <rect x="10" y="10" width="620" height="250" rx="4"/>
+    <rect x="30" y="40" width="580" height="200" rx="4" stroke-dasharray="4 3"/>
+    <rect x="50" y="70" width="540" height="150" rx="4" stroke="var(--accent)"/>
+    <rect x="70" y="130" width="120" height="34" rx="3"/><rect x="200" y="130" width="120" height="34" rx="3"/><rect x="330" y="130" width="120" height="34" rx="3"/><rect x="460" y="130" width="110" height="34" rx="3" stroke-dasharray="4 3"/>
+  </g>
+  <g fill="currentColor">
+    <text x="20" y="30">your laptop (macOS, Windows or Linux)</text>
+    <text x="40" y="60" fill="var(--muted)">Docker's Linux VM (on a Mac or Windows)</text>
+    <text x="60" y="90" fill="var(--accent)">container "kind-control-plane" = one Kubernetes node</text>
+    <text x="60" y="115" fill="var(--muted)">containerd runs the containers inside the node:</text>
+    <g text-anchor="middle">
+      <text x="130" y="152">apiserver</text><text x="260" y="152">etcd</text><text x="390" y="152">coredns …</text><text x="515" y="152" fill="var(--muted)">your app</text>
+    </g>
+    <text x="60" y="200" fill="var(--muted)">kubectl on your laptop talks to the apiserver</text>
+    <text x="60" y="215" fill="var(--muted)">through a port Docker forwards</text>
+  </g>
+</svg>
+</figure>
+
+<p>Remember the OCI standard from <a href="s1-01-why-containers.html">lesson 01</a>? Here it pays off. Inside the node there is no Docker at all. Kubernetes runs its containers with <strong>containerd</strong>, and your Docker-built image will run there unchanged, because both speak the same image format.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Feel the first pain. Start your server, check it, then kill it the way a crash would.</p>
+<pre class="cmd">docker run -d --name hello -p 8080:8080 hello:multi</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+<pre class="cmd">docker kill hello</pre>
+<pre class="cmd">docker ps -a --filter name=hello</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+  <details class="expect"><summary>Expected output (IDs and times differ)</summary>
+<pre>ok
+hello
+CONTAINER ID   IMAGE         COMMAND     CREATED         STATUS                       PORTS     NAMES
+0097704a9c5d   hello:multi   "/server"   4 seconds ago   Exited (137) 2 seconds ago             hello
+curl: (7) Failed to connect to localhost port 8080 after 1 ms: Couldn't connect to server</pre>
+  </details>
+  <p>Exit code 137 means "killed". It stays dead: no restart, no warning. Wait a minute and check again; nothing changes. Clean up:</p>
+<pre class="cmd">docker rm hello</pre>
+  <p class="note">No <code>hello:multi</code> yet? Any image that keeps running shows the same thing, for example <code>docker run -d --name hello python:3.13-slim sleep 600</code>.</p>
+</li>
+
+<li>
+  <p>Create a Kubernetes cluster. The first time, kind downloads its node image (about 1&nbsp;GB), so give it a few minutes.</p>
+<pre class="cmd">kind create cluster</pre>
+  <details class="expect"><summary>Expected output (the version and the last line vary)</summary>
+<pre>Creating cluster "kind" ...
+ ✓ Ensuring node image (kindest/node:v1.36.1) 🖼
+ ✓ Preparing nodes 📦
+ ✓ Writing configuration 📜
+ ✓ Starting control-plane 🕹️
+ ✓ Installing CNI 🔌
+ ✓ Installing StorageClass 💾
+Set kubectl context to "kind-kind"
+You can now use your cluster with:
+
+kubectl cluster-info --context kind-kind
+
+Have a nice day! 👋</pre>
+  </details>
+  <p class="note">kind also pointed <code>kubectl</code> at the new cluster: the <em>context</em> <code>kind-kind</code> in <code>~/.kube/config</code>.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[4]</a></sup></p>
+</li>
+
+<li>
+  <p>Ask the cluster who it is, and which nodes it has.</p>
+<pre class="cmd">kubectl cluster-info</pre>
+<pre class="cmd">kubectl get nodes</pre>
+  <details class="expect"><summary>Expected output (your port differs)</summary>
+<pre>Kubernetes control plane is running at https://127.0.0.1:65491
+CoreDNS is running at https://127.0.0.1:65491/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+NAME                 STATUS   ROLES           AGE   VERSION
+kind-control-plane   Ready    control-plane   2m    v1.36.1</pre>
+  </details>
+  <p>One node. If it says <code>NotReady</code>, wait 20 seconds and ask again: the node network is still starting.</p>
+</li>
+
+<li>
+  <p>Now look at the same thing from Docker's side.</p>
+<pre class="cmd">docker ps</pre>
+  <details class="expect"><summary>Expected output (other containers of yours may be listed too)</summary>
+<pre>CONTAINER ID   IMAGE                  COMMAND                  CREATED         STATUS         PORTS                       NAMES
+81496e50b9a2   kindest/node:v1.36.1   "/usr/local/bin/entr…"   2 minutes ago   Up 2 minutes   127.0.0.1:65491->6443/tcp   kind-control-plane</pre>
+  </details>
+  <p>Your whole cluster is this one container. Its port is the address <code>kubectl cluster-info</code> printed.</p>
+</li>
+
+<li>
+  <p>Look inside the node. <code>crictl</code> is the tool for talking to containerd there.</p>
+<pre class="cmd">docker exec kind-control-plane crictl ps</pre>
+  <details class="expect"><summary>Expected output (trimmed: some columns dropped)</summary>
+<pre>CONTAINER       IMAGE           ...   STATE     NAME                      ...   NAMESPACE
+dd858713988f8   fe81a497e85f1   ...   Running   coredns                   ...   kube-system
+b1a3b84e40d08   fe81a497e85f1   ...   Running   coredns                   ...   kube-system
+96487f949f086   3501a03785a84   ...   Running   local-path-provisioner    ...   local-path-storage
+382b8272d2c27   f2ede2b789a61   ...   Running   kindnet-cni               ...   kube-system
+8279eaaba7150   01ad784c02283   ...   Running   kube-proxy                ...   kube-system
+1647df1bd895d   6da6ea097b384   ...   Running   etcd                      ...   kube-system
+7bea771287e6e   4923943f21256   ...   Running   kube-apiserver            ...   kube-system
+51dca246b7f79   76e62361b06b5   ...   Running   kube-scheduler            ...   kube-system
+f9f70e529d4de   39d983367f38c   ...   Running   kube-controller-manager   ...   kube-system</pre>
+  </details>
+  <p>Kubernetes itself runs as containers: the API server, the etcd database, the scheduler, the controller manager. In the next lessons your app joins this list, run by containerd, not Docker.</p>
+</li>
+
+<li>
+  <p><strong>Leave the cluster running.</strong> Lesson 06 starts from it.</p>
+  <p class="note">After a laptop reboot: kind gives its node container a restart policy, so when Docker starts again the node usually comes back with your cluster in it. Check with <code>docker inspect kind-control-plane --format '{{.HostConfig.RestartPolicy.Name}}'</code>, which prints <code>on-failure</code>. If <code>kubectl get nodes</code> errors after a reboot, start over; it takes a minute. When you are finished with it for good, <code>kind delete cluster</code> removes it.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[4]</a></sup></p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You started <code>hello</code> with plain <code>docker run -d</code> and then ran <code>docker kill hello</code>. A minute later, what does <code>docker ps -a</code> show for it?</legend>
+  <button class="opt" data-why="No. Docker's default restart policy is no. It never restarts on its own unless you asked for it.">Up again, because Docker restarts killed containers by default</button>
+  <button class="opt" data-why="No. Without --rm a stopped container stays listed under docker ps -a until you remove it.">Nothing at all, because killed containers are removed immediately</button>
+  <button class="opt" data-why="Right. Exit code 137 means killed. Nothing watches it, so it stays down.">Exited (137), and it stays stopped until you act</button>
+  <button class="opt" data-why="No. This container was started by Docker, not Kubernetes. Kubernetes only manages what you declared to it.">Restarting, because Kubernetes noticed and is bringing it back</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>In one sentence, what does an orchestrator like Kubernetes add on top of Docker?</legend>
+  <button class="opt" data-why="Right. You declare desired state; controllers compare it with current state and close the gap, over and over.">It keeps actual state matching the state you declared</button>
+  <button class="opt" data-why="No. A container starts just as fast either way. The difference is who watches it afterwards.">It makes containers start faster than plain Docker can</button>
+  <button class="opt" data-why="No. You still build images. Kubernetes runs them; it does not make them.">It replaces images, so you never build them yourself</button>
+  <button class="opt" data-why="No. Kubernetes containers are still Linux processes. Your kind node runs in Docker's Linux VM.">It runs containers without any Linux kernel underneath them</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>You run <code>kubectl get nodes</code> the moment <code>kind create cluster</code> returns. What do you see?</legend>
+  <button class="opt" data-why="No. A default kind cluster has one node. Kubernetes is happy with one; production clusters just use more.">Three nodes, because Kubernetes always requires at least three nodes</button>
+  <button class="opt" data-why="No. The node is the kind-control-plane container, not your laptop.">Your laptop itself, listed as a single node named localhost</button>
+  <button class="opt" data-why="No. Nodes are machines (here, containers). They exist before any app is deployed.">An error, since nodes only appear after you deploy something</button>
+  <button class="opt" data-why="Right. One node. For the first ten to twenty seconds it can say NotReady while the node network starts.">One node, kind-control-plane, possibly NotReady for a few more seconds</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>What does <code>docker exec kind-control-plane docker ps</code> print?</legend>
+  <button class="opt" data-why="No. The node is isolated from your Docker daemon. It runs its own containerd.">Your laptop's containers, because the node shares your Docker daemon</button>
+  <button class="opt" data-why="Right. 'docker': executable file not found. Kubernetes inside the node uses containerd; crictl is the tool to look.">An error: there is no docker binary in the node</button>
+  <button class="opt" data-why="No. Those containers exist, but containerd runs them, and Docker is not installed in the node.">The Kubernetes system containers, listed by Docker inside the node</button>
+  <button class="opt" data-why="No. Even an empty cluster runs about nine system containers. And there is no docker command to list them anyway.">An empty list, because the cluster runs no apps yet</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>You reboot your laptop. What happens to the kind cluster?</legend>
+  <button class="opt" data-why="No. The node's state lives in the container's filesystem, which survives a reboot.">Is gone for good, because kind keeps everything in memory</button>
+  <button class="opt" data-why="No. The nodes are Docker containers. With Docker stopped, nothing runs.">Keeps running, because kind nodes do not need Docker running</button>
+  <button class="opt" data-why="Right. kind sets a restart policy on the node container. If the cluster comes back broken anyway, delete and recreate it.">Usually returns when Docker starts, as the node container restarts</button>
+  <button class="opt" data-why="No. kind makes no backups. Your YAML files in Git are your backup, which is one reason we keep them there.">Must be restored from a backup that kind makes nightly</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>What is kind?</legend>
+  <button class="opt" data-why="No. kind runs real, unmodified Kubernetes. Only the nodes are unusual.">A smaller Kubernetes with fewer features, made for laptops</button>
+  <button class="opt" data-why="No. kind makes no VM of its own. It uses the Docker you already have.">A virtual machine image that installs Kubernetes on macOS</button>
+  <button class="opt" data-why="No. docker run and kubectl stay separate tools. kind only creates and deletes clusters.">A Docker plugin that turns docker run into kubectl</button>
+  <button class="opt" data-why="Right. Kubernetes IN Docker: each node is a container, which is why docker ps shows kind-control-plane.">Kubernetes nodes running as Docker containers on your laptop</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>, the sections "Creating a Cluster" and "Loading an Image" (about ten minutes). The second one is where the <code>:latest</code> trap that lesson 06 warns you about is written down.
+</div>
+
+<p class="ask">Cluster won't start, or something here doesn't add up? Ask your instructor, or ask in the course channel. Bring your questions to the session.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://docs.docker.com/reference/cli/docker/container/run/#restart">Docker: docker run, restart policies</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Kubernetes: Objects in Kubernetes</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes: Controllers</a> ·
+[4] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>.
+Commands verified 2026-10-06 on Docker 28.3, kind v0.32.0 (node image kindest/node:v1.36.1) and kubectl v1.36.1 (macOS). With kind v0.33.0 your node reports v1.37.0.</p>
+
+<nav class="pager"><a href="s1-04-advanced-dockerfile.html">← previous: advanced Dockerfile</a><a href="s1-06-looking-with-kubectl.html">next: looking with kubectl →</a></nav>
+
+</main>
+</body>
+</html>

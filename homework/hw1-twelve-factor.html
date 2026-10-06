@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Twelve-Factor Server</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Homework 1 · between session 1 and session 2 · about 6–8 hours</p>
+<h1>Make your server twelve-factor</h1>
+
+<div class="win">
+  <strong>Your win:</strong> a server that meets all twelve factors. It counts its visitors in a shared backing service, runs as two replicas on your kind cluster, shuts down without dropping a request, and passes the self-check script.
+</div>
+
+<p class="meta">Before this: Session 1 and its lessons, especially the twelve-factor table in <a href="../lessons/s1-02-web-server.html">lesson 02</a>. Your 20-line server meets about seven of the twelve factors. This homework closes the gap. Everything you need that the lessons did not cover is in <a href="#new">New for this homework</a> below.</p>
+
+<h2>How to submit</h2>
+
+<ol>
+  <li>In your <code>hello</code> repository, create a branch: <code>git switch -c hw1-twelve-factor</code>.</li>
+  <li>Do the work, commit, push the branch, and open a <strong>pull request</strong> into <code>main</code>.</li>
+  <li>Paste the full output of the self-check script into the pull request description, and request your instructor as reviewer.</li>
+  <li>Deadline: <strong>before session 2</strong>. Your instructor reviews between sessions and may ask for changes. Answer the review comments in the same pull request.</li>
+</ol>
+
+<h2>What to build</h2>
+
+<p>The self-check script talks to your server, so the <strong>interface below is fixed</strong>. How you build it inside is up to you.</p>
+
+<h3>HTTP endpoints</h3>
+<table>
+  <thead><tr><th>Request</th><th>Response</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /</code></td><td>Increments a visit counter <strong>stored in Redis</strong> and answers <code>&lt;greeting&gt; (visit &lt;n&gt;, served by &lt;hostname&gt;)</code>, e.g. <code>hello from the cluster (visit 7, served by hello-6d9f…)</code>. If Redis is unreachable, answer <code>503</code>.</td></tr>
+    <tr><td><code>GET /healthz</code></td><td><code>ok</code>. It must work even when Redis is down: is the <em>process</em> alive?</td></tr>
+    <tr><td><code>GET /slow</code></td><td>Waits 3 seconds, then answers <code>200</code>. It exists only so the check can prove a graceful shutdown.</td></tr>
+  </tbody>
+</table>
+
+<h3>Configuration (environment only)</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>PORT</code></td><td><code>8080</code></td><td>port to listen on</td></tr>
+    <tr><td><code>GREETING</code></td><td><code>hello from my container</code></td><td>first part of the <code>/</code> answer</td></tr>
+    <tr><td><code>REDIS_URL</code></td><td><code>redis://localhost:6379/0</code></td><td>where the backing service is</td></tr>
+  </tbody>
+</table>
+
+<h3>Behaviour</h3>
+<ul>
+  <li><strong>Admin process:</strong> running the same binary with the single argument <code>reset</code> sets the visit counter back to zero and exits 0. It does not start the server.</li>
+  <li><strong>Logs:</strong> one JSON object per line on <strong>stdout</strong>, nothing on stderr. One event per request, including at least the method, the path and the status.</li>
+  <li><strong>Shutdown:</strong> on <code>SIGTERM</code>, stop accepting new connections, let requests already in progress finish, then exit 0.</li>
+</ul>
+
+<h3>Files in your repository</h3>
+<table>
+  <thead><tr><th>File</th><th>Contents</th></tr></thead>
+  <tbody>
+    <tr><td><code>main.go</code>, <code>go.mod</code>, <code>go.sum</code></td><td>the server and its declared dependencies</td></tr>
+    <tr><td><code>Dockerfile</code></td><td>multi-stage, distroless, non-root, as in <a href="../lessons/s1-04-advanced-dockerfile.html">lesson 04</a>, now with <code>go.sum</code> and a cached <code>go mod download</code> step</td></tr>
+    <tr><td><code>k8s/redis.yaml</code></td><td>a Deployment and a Service, both named <code>redis</code>, image <code>redis:8-alpine</code>, port 6379</td></tr>
+    <tr><td><code>k8s/deployment.yaml</code></td><td>Deployment <code>hello</code>: <strong>2 replicas</strong>, image <code>hello:0.2.0</code>, <code>REDIS_URL</code> and <code>GREETING</code> set in <code>env</code>, startup, readiness and liveness probes on <code>/healthz</code>, requests and a memory limit</td></tr>
+    <tr><td><code>k8s/service.yaml</code></td><td>Service <code>hello</code>, port 80 → 8080, as in <a href="../lessons/s1-08-write-the-yaml.html">lesson 08</a></td></tr>
+    <tr><td><code>README.md</code></td><td>how to run it from a clean clone, plus a <strong>twelve-row table</strong>: for every factor, where your repository meets it, or why it does not apply</td></tr>
+  </tbody>
+</table>
+
+<h2>The twelve factors, and how each is judged</h2>
+<table>
+  <thead><tr><th>Factor</th><th>What you must show</th><th>Checked by</th></tr></thead>
+  <tbody>
+    <tr><td>I. Codebase</td><td>one repo; the pull request is the whole change</td><td>reviewer</td></tr>
+    <tr><td>II. Dependencies</td><td>go-redis declared in <code>go.mod</code>/<code>go.sum</code>, nothing assumed on the machine</td><td>reviewer</td></tr>
+    <tr><td>III. Config</td><td><code>PORT</code>, <code>GREETING</code>, <code>REDIS_URL</code> from the environment, set in the Deployment</td><td>script + reviewer</td></tr>
+    <tr><td>IV. Backing services</td><td>Redis found only through <code>REDIS_URL</code>; <code>503</code> while it is unreachable</td><td>script</td></tr>
+    <tr><td>V. Build, release, run</td><td>one image <code>hello:0.2.0</code>, configured differently in Docker and in Kubernetes without a rebuild</td><td>reviewer</td></tr>
+    <tr><td>VI. Processes</td><td>no state in memory: one rising count across both replicas</td><td>script</td></tr>
+    <tr><td>VII. Port binding</td><td>the server serves HTTP itself on <code>$PORT</code></td><td>script</td></tr>
+    <tr><td>VIII. Concurrency</td><td>2 ready replicas behind one Service</td><td>script</td></tr>
+    <tr><td>IX. Disposability</td><td>fast start; <code>SIGTERM</code> finishes <code>/slow</code> and exits 0</td><td>script</td></tr>
+    <tr><td>X. Dev/prod parity</td><td>the same image and the same Redis image in Docker and in kind</td><td>reviewer</td></tr>
+    <tr><td>XI. Logs</td><td>JSON events on stdout, one per request, none on stderr</td><td>script</td></tr>
+    <tr><td>XII. Admin processes</td><td><code>reset</code> runs as a one-off pod from the same image</td><td>script</td></tr>
+  </tbody>
+</table>
+
+<h2 id="new">New for this homework</h2>
+<p>These are the pieces the session 1 lessons did not cover. Each one comes with the primary source to read.</p>
+
+<h3>1. A dependency</h3>
+<p>Add the official Redis client with <code>go get github.com/redis/go-redis/v9</code>. It updates <code>go.mod</code> and writes <code>go.sum</code>, the checksums that pin exactly what you downloaded. Commit both.<sup class="cite"><a href="https://go.dev/ref/mod#go-get">[1]</a></sup> Start from the client's <em>Getting started</em> guide: <code>redis.ParseURL</code> turns <code>REDIS_URL</code> into options, and <code>Incr</code> is an atomic counter.<sup class="cite"><a href="https://redis.uptrace.dev/guide/go-redis.html">[2]</a></sup> In the Dockerfile, copy <code>go.mod go.sum</code> and run <code>go mod download</code> <em>before</em> copying your code. That is the cache trick from lesson 04, and now it saves real time.</p>
+
+<p>While you develop, run Redis on your laptop in a container. Its port is published on <code>localhost:6379</code>, so <code>go run .</code> finds it with the default <code>REDIS_URL</code>:</p>
+<pre class="cmd">docker run -d --name redis -p 6379:6379 redis:8-alpine</pre>
+<pre class="cmd">docker exec redis redis-cli ping</pre>
+<details class="expect"><summary>Expected output</summary>
+<pre>PONG</pre>
+</details>
+<p>Stop it with <code>docker stop redis</code> to see your <code>503</code>, start it again with <code>docker start redis</code>, and remove it with <code>docker rm -f redis</code> when you are done.</p>
+
+<h3>2. Redis in the cluster</h3>
+<p><code>k8s/redis.yaml</code> holds a Deployment and a Service, with the same shape you wrote in lesson 08. Two YAML documents can share one file if you separate them with a line containing only <code>---</code>. Inside the cluster, a Service's name is also its DNS name, so your server reaches Redis at <code>redis://redis:6379/0</code>.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">[3]</a></sup> Losing the counter when the Redis pod restarts is fine for this homework.</p>
+
+<h3>3. Environment variables in a Deployment</h3>
+<p>Each container in the pod template can carry an <code>env</code> list:<sup class="cite"><a href="https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/">[4]</a></sup></p>
+<pre class="file">env:
+  - name: GREETING
+    value: hello from the cluster</pre>
+
+<h3>4. Probes: startup, readiness, liveness</h3>
+<p>The kubelet keeps asking your container questions, and a <strong>probe</strong> is one of those questions. Kubernetes has three kinds, and each failure leads to a different action:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">[11]</a></sup></p>
+<table>
+  <thead><tr><th>Probe</th><th>The question</th><th>When it fails</th></tr></thead>
+  <tbody>
+    <tr><td><strong>startup</strong></td><td>Has the app finished starting?</td><td>After <code>failureThreshold</code> misses the container is <strong>restarted</strong>. Until it succeeds, the other two probes do not run at all.</td></tr>
+    <tr><td><strong>readiness</strong></td><td>Should this pod get traffic right now?</td><td>The pod's IP is <strong>removed from the Service</strong>. Nothing is restarted, and it gets traffic again once it passes.</td></tr>
+    <tr><td><strong>liveness</strong></td><td>Is the process stuck beyond repair?</td><td>The container is <strong>restarted</strong>, with <code>SIGTERM</code> first, so your graceful shutdown runs.</td></tr>
+  </tbody>
+</table>
+<p>Every probe has the same timing knobs.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">[11]</a></sup> <code>periodSeconds</code> (default 10) is how often it asks. <code>timeoutSeconds</code> (default 1) is how long one answer may take. <code>failureThreshold</code> (default 3) is how many misses in a row count as failure. <code>initialDelaySeconds</code> is how long to wait before the first question. A startup probe gives a slow app <code>failureThreshold × periodSeconds</code> to come up: 30 × 10 is a 5-minute budget, for example.<sup class="cite"><a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">[5]</a></sup> Without a startup probe, the only way to protect a slow starter is a long <code>initialDelaySeconds</code> on liveness, which also delays catching real failures.</p>
+<p>Your server starts in milliseconds, but you still configure all three in <code>k8s/deployment.yaml</code>, all against <code>/healthz</code> on port 8080:</p>
+<pre class="file">startupProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  periodSeconds: 1
+  failureThreshold: 10
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080</pre>
+<p>Here is what each failure really looks like. These are three pods whose probe points at port 9999, where nothing listens, observed for 40 seconds on kind:</p>
+<details class="expect"><summary>kubectl get pods</summary>
+<pre>NAME         READY   STATUS             RESTARTS      AGE
+ready-demo   0/1     Running            0             40s
+live-demo    0/1     CrashLoopBackOff   3 (14s ago)   40s
+start-demo   0/1     CrashLoopBackOff   3 (4s ago)    40s</pre>
+</details>
+<details class="expect"><summary>kubectl events (one line from each pod)</summary>
+<pre>Warning  Unhealthy  Pod/ready-demo  Readiness probe failed: Get "http://10.244.0.8:9999/healthz": dial tcp 10.244.0.8:9999: connect: connection refused
+Normal   Killing    Pod/live-demo   Container hello failed liveness probe, will be restarted
+Normal   Killing    Pod/start-demo  Container hello failed startup probe, will be restarted</pre>
+</details>
+<p><code>ready-demo</code> never restarts. It only drops out of the Service, and <code>kubectl get endpointslices -l kubernetes.io/service-name=hello</code> lists it with <code>ready=false</code>. The other two restart until they back off.</p>
+<p class="warn"><strong>The classic mistake:</strong> a liveness probe that checks a dependency. If <code>/healthz</code> asked Redis and Redis went down, every replica would fail liveness and be restarted over and over, and restarting your server fixes nothing about Redis. Liveness asks about <em>this process</em> only. If you ever want "Redis is down, stop sending me traffic", that belongs in readiness, never in liveness.</p>
+
+<h3>5. Structured logs, and libraries that log</h3>
+<p>Go's <code>log/slog</code> package writes JSON with <code>slog.NewJSONHandler(os.Stdout, nil)</code>. Make it the default logger, and log one event per request from a small wrapper around your handler.<sup class="cite"><a href="https://pkg.go.dev/log/slog">[6]</a></sup> Watch out: <strong>libraries log too</strong>. When Redis is unreachable, go-redis prints its own lines to stderr unless you hand it a logger with <code>redis.SetLogger</code>.<sup class="cite"><a href="https://pkg.go.dev/github.com/redis/go-redis/v9#SetLogger">[7]</a></sup> The self-check catches this, so check your stderr.</p>
+
+<h3>6. Graceful shutdown</h3>
+<p>When Kubernetes stops a pod, it sends <code>SIGTERM</code> and waits a grace period, 30 seconds by default, before it kills the process.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">[8]</a></sup> Use that time. <code>signal.NotifyContext</code> gives you a context that is cancelled on <code>SIGTERM</code>.<sup class="cite"><a href="https://pkg.go.dev/os/signal#NotifyContext">[9]</a></sup> <code>http.Server.Shutdown</code> stops accepting new connections and waits for running requests to finish.<sup class="cite"><a href="https://pkg.go.dev/net/http#Server.Shutdown">[10]</a></sup> This means you need an <code>http.Server</code> value instead of the bare <code>http.ListenAndServe</code>.</p>
+
+<h3>7. A one-off admin process</h3>
+<p>Read <code>os.Args</code>. If the first argument is <code>reset</code>, clear the counter and return before the server starts. In the cluster, run it as a temporary pod from the <em>same</em> image and the same config:</p>
+<pre class="cmd">kubectl run reset --rm -it --restart=Never --image=hello:0.2.0 --env=REDIS_URL=redis://redis:6379/0 -- reset</pre>
+
+<h3>8. Getting the image into kind</h3>
+<p>No registry yet; publishing images comes in session 2. Build and load it exactly as in session 1, with the new version tag:</p>
+<pre class="cmd">docker build -t hello:0.2.0 .</pre>
+<pre class="cmd">kind load docker-image hello:0.2.0</pre>
+
+<h2>Self-check</h2>
+<p>Download the check script from the course repository, deploy your work, and run it against your image:</p>
+<pre class="cmd">curl -fsSLO https://raw.githubusercontent.com/origoss/kubernetes-and-devops/main/scripts/check-12factor.sh &amp;&amp; chmod +x check-12factor.sh</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">./check-12factor.sh hello:0.2.0</pre>
+<p>Part 1 runs your image in Docker, with Redis deliberately unreachable. Part 2 checks your deployment in kind. It takes about a minute. A passing run looks like this:</p>
+<details class="expect"><summary>Expected output</summary>
+<pre>Homework 1 self-check · image hello:0.2.0
+
+Part 1: the process (Docker, no backing service reachable)
+✔ IX  starts fast and answers /healthz, even without its backing service
+✔ IV  GET / answers 503 while the backing service is unreachable
+✔ IX  SIGTERM: the in-flight /slow request finished and the process exited 0
+✔ XI  logs: 10 JSON events on stdout, nothing on stderr, requests are logged
+
+Part 2: the deployment (kubectl context: kind-kind)
+✔ VIII 2 replicas of hello are ready
+✔      startup, readiness and liveness probes set (/healthz), memory limit 64Mi
+✔ III REDIS_URL and GREETING come from the Deployment's env
+✔ XII one-off admin process 'reset' ran with the same image, and the counter restarted at 1
+✔ VI  8 requests across 2 pods counted 1 2 3 4 5 6 7 8 : state lives in the backing service
+✔ III responses use GREETING from the environment
+
+10 passed, 0 failed
+✔ ALL CHECKS PASSED. Paste this output into your pull request.</pre>
+</details>
+<p class="note">For comparison, the 20-line session 1 server passes 4 of these checks and fails 6. Run the script against your old image first to see where you start.</p>
+
+<h2>Questions your reviewer will ask</h2>
+<p>A green check proves the behaviour. Review checks that you understand it. Expect questions like these in your pull request or at session 2, and be ready to explain every line you submit:</p>
+<ol>
+  <li>Why does <code>/healthz</code> not ask Redis? What would happen to your two replicas if it did, and Redis went down?</li>
+  <li>A pod is deleted while it answers <code>/slow</code>. Walk through what Kubernetes and your code do, second by second.</li>
+  <li>You scale to five replicas. Why does the count stay right, and what would break if the counter were a Go variable?</li>
+  <li>Redis now needs a password. Where does it go, and where must it never go?</li>
+  <li>Why is <code>reset</code> a separate one-off process and not an HTTP endpoint?</li>
+  <li>What is in <code>go.sum</code>, and why is it committed?</li>
+  <li>Which factor was hardest to meet, and which one does your README mark as "not applicable"?</li>
+</ol>
+
+<h2>Not required</h2>
+<p>Redis persistence, Redis passwords, high availability, Helm, CI: all of that comes later or is out of scope. Keep it small and correct.</p>
+
+<p class="ask">Stuck? Reread the linked source first, then ask your instructor or the course channel. Post the failing self-check output with your question.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://go.dev/ref/mod#go-get">Go: go get</a> ·
+[2] <a href="https://redis.uptrace.dev/guide/go-redis.html">go-redis: Getting started</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">Kubernetes: DNS for Services and Pods</a> ·
+[4] <a href="https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/">Kubernetes: Define environment variables</a> ·
+[5] <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">Kubernetes: Configure probes</a> ·
+[6] <a href="https://pkg.go.dev/log/slog">Go: log/slog</a> ·
+[7] <a href="https://pkg.go.dev/github.com/redis/go-redis/v9#SetLogger">go-redis: SetLogger</a> ·
+[8] <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Kubernetes: Pod termination</a> ·
+[9] <a href="https://pkg.go.dev/os/signal#NotifyContext">Go: signal.NotifyContext</a> ·
+[10] <a href="https://pkg.go.dev/net/http#Server.Shutdown">Go: http.Server.Shutdown</a> ·
+[11] <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">Kubernetes: Liveness, readiness and startup probes</a>.
+Requirements and self-check verified 2026-10-06 against a reference solution on kind v0.33.0 / Kubernetes v1.37.0 (pass: 10/10), and against the session 1 server (4 passed, 6 failed).</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advanced Dockerfile</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Docker · about 20 minutes</p>
+<h1>Advanced Dockerfile: multi-stage, EXPOSE, VOLUME, USER</h1>
+
+<div class="win">
+  <strong>Your win:</strong> a 20&nbsp;MB image of <em>your own</em> web server that documents its port, declares where its data lives, and runs as a non-root user. You can explain what each of those four instructions does and what it does <em>not</em> do.
+</div>
+
+<p class="meta">Before this: you have a Go server with <code>/</code> and <code>/healthz</code> that reads its port from <code>PORT</code>, the <code>hello:single</code> image from <a href="s1-03-first-dockerfile.html">lesson 03</a>, and Docker running (Docker Desktop on a Mac, Docker Engine on Linux or WSL).</p>
+
+<h2>Multi-stage: build fat, ship thin</h2>
+
+<p>An image is a stack of read-only <strong>layers</strong>: each instruction in a Dockerfile adds one.<sup class="cite"><a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">[1]</a></sup> Everything a layer adds stays in the image for good, including the whole Go toolchain you only needed for one minute to compile.</p>
+
+<p>A <strong>multi-stage build</strong> fixes this. The first stage has the compiler and builds the binary. The second stage starts from an almost empty base and copies <em>only what you name</em> across with <code>COPY --from</code>. Nothing else from the first stage reaches the final image.<sup class="cite"><a href="https://docs.docker.com/build/building/multi-stage/">[2]</a></sup></p>
+
+<p>Go makes this dramatic: with <code>CGO_ENABLED=0</code> the binary is static, so the run stage needs no OS libraries at all. Google's <em>distroless</em> <code>static</code> image is about 2&nbsp;MB and has no shell and no package manager.<sup class="cite"><a href="https://github.com/GoogleContainerTools/distroless">[3]</a></sup></p>
+
+<h2>EXPOSE: a label, not a door</h2>
+
+<p><code>EXPOSE 8080</code> records in the image that the app listens on port 8080. It does <strong>not</strong> open or publish anything.<sup class="cite"><a href="https://docs.docker.com/reference/dockerfile/#expose">[4]</a></sup> The port only becomes reachable from your laptop when <em>you</em> publish it at run time: <code>-p 8080:8080</code> picks the host port, <code>-P</code> publishes every exposed port on a random free host port. And it does not tell your server which port to use: that is still <code>PORT</code>.</p>
+
+<h2>VOLUME: data that outlives the container</h2>
+
+<p>A container's writable layer is deleted with the container. A <strong>volume</strong> is storage managed by Docker that lives outside it, so the data survives <code>docker rm</code> and can be mounted into the next container.<sup class="cite"><a href="https://docs.docker.com/engine/storage/volumes/">[5]</a></sup> <code>VOLUME /data</code> marks <code>/data</code> as such a place: if you start the container without mounting anything there, Docker creates an anonymous volume for it.<sup class="cite"><a href="https://docs.docker.com/reference/dockerfile/#volume">[6]</a></sup></p>
+
+<p>A fresh named volume is filled from the image the first time it is mounted, <em>ownership included</em>. So the directory must already belong to the user that will write to it. Otherwise that user gets <code>Permission denied</code>.</p>
+
+<p class="note">Your server writes nothing to disk, and in the homework the state lives in Redis. That is on purpose: twelve-factor processes are stateless. <code>VOLUME</code> is here so you can read it in other people's images (every database image has one). Kubernetes ignores <code>VOLUME</code>: there, a Pod gets storage only when its spec asks for it.</p>
+
+<h2>USER: who the process is</h2>
+
+<p>Without <code>USER</code>, the process runs as root inside the container. <code>USER</code> sets the user (and optionally the group) for <code>RUN</code> steps that follow and for the running container.<sup class="cite"><a href="https://docs.docker.com/reference/dockerfile/#user">[7]</a></sup> If your server has an exploitable bug, the attacker then holds an unprivileged user, not root.<sup class="cite"><a href="https://docs.docker.com/build/building/best-practices/">[8]</a></sup></p>
+
+<p>Write the user as a <strong>number</strong>: <code>USER 65532:65532</code> (distroless calls this user <code>nonroot</code>). Kubernetes can enforce "never run as root" with <code>runAsNonRoot</code>, but it can only check a numeric user. With a name, the Pod stays in <code>CreateContainerConfigError</code> and its events say: <code>container has runAsNonRoot and image has non-numeric user (nonroot), cannot verify user is non-root</code>.<sup class="cite"><a href="https://kubernetes.io/docs/tasks/configure-pod-container/security-context/">[9]</a></sup></p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Check that the naive image from lesson 03 is still there:</p>
+<pre class="cmd">docker images hello:single</pre>
+  <p>If it is missing, rebuild it from your <code>Dockerfile.single</code>:</p>
+<pre class="cmd">docker build -f Dockerfile.single -t hello:single .</pre>
+</li>
+
+<li>
+  <p>Now the real one. Read every line before you save it, and use the comments to check that you know why each line is there.</p>
+  <p class="filename">Dockerfile</p>
+<pre class="file"># Stage 1: build: has the Go toolchain
+FROM golang:1.27 AS build
+WORKDIR /src
+# go.mod changes rarely → this layer stays cached
+COPY go.mod ./
+# your code changes often → only this step and below rebuild
+COPY *.go ./
+RUN CGO_ENABLED=0 go build -o /server .
+# an empty directory for the volume (distroless has no mkdir)
+RUN mkdir /data
+
+# Stage 2: run: only what we copy across
+FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=build /server /server
+# the volume directory must belong to the user that writes to it
+COPY --from=build --chown=65532:65532 /data /data
+VOLUME /data
+# documentation: the server listens here (unless PORT says otherwise)
+EXPOSE 8080
+# numeric, so Kubernetes can verify it is not root
+USER 65532:65532
+ENTRYPOINT ["/server"]</pre>
+  <p>Add a <code>.dockerignore</code> so the build context stays small:<sup class="cite"><a href="https://docs.docker.com/build/concepts/context/">[10]</a></sup></p>
+  <p class="filename">.dockerignore</p>
+<pre class="file">.git
+*.md
+Dockerfile*</pre>
+<pre class="cmd">docker build -t hello:multi .</pre>
+</li>
+
+<li>
+  <p><strong>Multi-stage.</strong> Compare the two images.</p>
+<pre class="cmd">docker images hello</pre>
+  <details class="expect"><summary>Expected output (sizes vary by Docker version)</summary>
+<pre>REPOSITORY   TAG      ...   SIZE
+hello        multi    ...   19.1MB
+hello        single   ...   1.43GB</pre>
+  </details>
+  <p>All three new instructions are recorded in the image's config:</p>
+<pre class="cmd">docker inspect hello:multi --format '{{.Config.User}} {{json .Config.ExposedPorts}} {{json .Config.Volumes}}'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>65532:65532 {"8080/tcp":{}} {"/data":{}}</pre>
+  </details>
+</li>
+
+<li>
+  <p><strong>EXPOSE.</strong> Run with <code>-P</code> and let Docker publish the exposed port on a random host port. Ask Docker which one it picked, then call it (use <em>your</em> port number).</p>
+<pre class="cmd">docker run -d --name hello -P hello:multi</pre>
+<pre class="cmd">docker port hello</pre>
+<pre class="cmd">curl localhost:55000/healthz</pre>
+  <details class="expect"><summary>Expected output (your port differs)</summary>
+<pre>8080/tcp -&gt; 0.0.0.0:55000
+ok</pre>
+  </details>
+</li>
+
+<li>
+  <p><strong>USER.</strong> Look at the running process from outside, then try to get a shell inside.</p>
+<pre class="cmd">docker top hello -o user,pid,cmd</pre>
+<pre class="cmd">docker exec -it hello sh</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>USER    PID     CMD
+65532   154698  /server
+OCI runtime exec failed: exec failed: unable to start container process:
+exec: "sh": executable file not found in $PATH: unknown</pre>
+  </details>
+  <p class="note">That error is the point: there is no shell to exec into. When you need to debug a distroless container, you attach a debug container instead; you will meet <code>kubectl debug</code> later.</p>
+</li>
+
+<li>
+  <p><strong>VOLUME.</strong> You started the container without mounting anything, so Docker created an anonymous volume for <code>/data</code>:</p>
+<pre class="cmd">docker inspect hello --format '{{range .Mounts}}{{.Type}} {{.Name}} -&gt; {{.Destination}}{{end}}'</pre>
+  <details class="expect"><summary>Expected output (the long name is random)</summary>
+<pre>volume e7607f92f35e…bb0478d85 -&gt; /data</pre>
+  </details>
+  <p>Remove the container <em>and</em> its anonymous volume (<code>-v</code>), then start again with a <strong>named</strong> volume:</p>
+<pre class="cmd">docker rm -f -v hello</pre>
+<pre class="cmd">docker run -d --name hello -p 8080:8080 -v hello-data:/data hello:multi</pre>
+  <p>Your server writes nothing, so write a file into the volume with a tiny <code>busybox</code> container running as the same user, 65532:</p>
+<pre class="cmd">docker run --rm --user 65532 -v hello-data:/data busybox:1.37 sh -c 'echo "written at $(date -u +%H:%M)" &gt; /data/note.txt'</pre>
+  <p>Delete the <code>hello</code> container. Then look into the volume:</p>
+<pre class="cmd">docker rm -f hello</pre>
+<pre class="cmd">docker run --rm -v hello-data:/data busybox:1.37 ls -ln /data</pre>
+<pre class="cmd">docker run --rm -v hello-data:/data busybox:1.37 cat /data/note.txt</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>total 4
+-rw-r--r--    1 65532    0     17 Oct  6 09:03 note.txt
+written at 09:03</pre>
+  </details>
+  <p>The container is gone; the data is not. Try it without <code>--chown=65532:65532</code> in the Dockerfile, and the same write fails with <code>sh: can't create /data/note.txt: Permission denied</code>, because <code>/data</code> then belongs to root.</p>
+</li>
+
+<li>
+  <p>Clean up. A named volume is never deleted for you; you have to remove it by name.</p>
+<pre class="cmd">docker volume rm hello-data</pre>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why does <code>hello:multi</code> not contain the Go compiler?</legend>
+  <button class="opt" data-why="Right. COPY --from picks single files out of the build stage. Everything else in that stage is thrown away.">Only files copied from the build stage reach it</button>
+  <button class="opt" data-why="No. Docker never removes anything on its own. A layer, once written, stays in that stage's image.">Docker deletes compilers automatically after every successful build step</button>
+  <button class="opt" data-why="No. Distroless removes nothing at runtime. It simply never contained a compiler in the first place.">The distroless base image strips compilers out during startup</button>
+  <button class="opt" data-why="No. .dockerignore only filters what is sent from your laptop as build context. The compiler comes from the golang image.">The .dockerignore file excludes the compiler from the image</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>
+  <code>docker run -d -e PORT=9090 -p 8080:8080 hello:multi</code>, then <code>curl localhost:8080</code>. What do you get?</legend>
+  <button class="opt" data-why="No. The server read PORT=9090, so nothing inside the container listens on 8080.">hello from my container, served on port 8080</button>
+  <button class="opt" data-why="No. EXPOSE is documentation. It never changes which port the process opens.">EXPOSE 8080 forces the server back onto 8080</button>
+  <button class="opt" data-why="Right. curl: (56) Recv failure: Connection reset by peer. Docker forwards to container port 8080, but your server listens on 9090.">Connection reset, because nothing listens on port 8080</button>
+  <button class="opt" data-why="No. Docker does not check whether anything listens. The container starts fine and only the request fails.">Docker refuses to start the container: ports conflict</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>You run <code>docker run -d --name hello hello:multi</code> with no <code>-p</code> and no <code>-P</code>. Can <code>curl localhost:8080</code> on your laptop reach it?</legend>
+  <button class="opt" data-why="No. EXPOSE records the port in the image. Publishing happens only at run time, with -p or -P.">Yes, because EXPOSE publishes port 8080 on every start</button>
+  <button class="opt" data-why="No. Nothing is published, so Docker never picks a host port at all.">Yes, on a random port shown by docker port</button>
+  <button class="opt" data-why="No. The server listens on 8080 inside the container just fine. The missing piece is the published host port.">No, because the server only ever starts with -p</button>
+  <button class="opt" data-why="Right. The port is exposed but not published. curl gets connection refused on your laptop.">No, because exposed is not the same as published</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>You drop <code>--chown=65532:65532</code> from the <code>COPY</code> of <code>/data</code>. What breaks?</legend>
+  <button class="opt" data-why="No. The build still works: copying a root-owned directory is perfectly legal.">The build fails because the /data directory has no owner</button>
+  <button class="opt" data-why="Right. /data and the volume filled from it belong to root, and user 65532 may not write there.">Writing into the volume fails with a permission denied error</button>
+  <button class="opt" data-why="No. VOLUME does not care who owns the directory. The volume is still created.">Docker no longer creates any volume for the /data path</button>
+  <button class="opt" data-why="No. The server never touches /data, so it starts and answers exactly as before.">The server crashes at startup since the /data path vanished</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why <code>USER 65532:65532</code> instead of <code>USER nonroot</code>?</legend>
+  <button class="opt" data-why="Right. runAsNonRoot can only check a number. With a name, the kubelet refuses to start the container.">Kubernetes can verify a numeric user is not root</button>
+  <button class="opt" data-why="No. Both forms work in Docker. distroless defines the name nonroot in its /etc/passwd.">Docker cannot resolve user names inside a distroless image</button>
+  <button class="opt" data-why="No. Startup speed is the same. Name lookup is a tiny file read.">Numeric users make the container start up noticeably faster</button>
+  <button class="opt" data-why="No. Port 8080 needs no privileges for any user. Only ports below 1024 traditionally do.">Only numeric users are allowed to open port 8080</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You run <code>docker rm -f hello</code> (no <code>-v</code>) on a container started with <code>-v hello-data:/data</code>. What happens to <code>note.txt</code>?</legend>
+  <button class="opt" data-why="No. A named volume is never removed with the container, not even with -v.">It is deleted together with the container's writable layer</button>
+  <button class="opt" data-why="No. Volumes are not part of the image. The image never changes when a container writes.">It is saved back into the hello:multi image itself</button>
+  <button class="opt" data-why="Right. The volume lives outside the container. The next container that mounts hello-data sees the file.">It stays in hello-data until you remove that volume</button>
+  <button class="opt" data-why="No. Docker keeps volumes until you remove them. Nothing expires on its own.">It survives only until Docker restarts on your laptop</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://docs.docker.com/build/building/best-practices/">Docker: Building best practices</a>. Its sections on multi-stage builds, the build cache, <code>EXPOSE</code>, <code>VOLUME</code> and <code>USER</code> take about ten minutes.
+</div>
+
+<p class="ask">Stuck, or something here doesn't add up? Ask your instructor, or ask in the course channel. Questions are the fastest way through this.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">Docker: Understanding image layers</a> ·
+[2] <a href="https://docs.docker.com/build/building/multi-stage/">Docker: Multi-stage builds</a> ·
+[3] <a href="https://github.com/GoogleContainerTools/distroless">Google: distroless</a> ·
+[4] <a href="https://docs.docker.com/reference/dockerfile/#expose">Dockerfile reference: EXPOSE</a> ·
+[5] <a href="https://docs.docker.com/engine/storage/volumes/">Docker: Volumes</a> ·
+[6] <a href="https://docs.docker.com/reference/dockerfile/#volume">Dockerfile reference: VOLUME</a> ·
+[7] <a href="https://docs.docker.com/reference/dockerfile/#user">Dockerfile reference: USER</a> ·
+[8] <a href="https://docs.docker.com/build/building/best-practices/">Docker: Building best practices</a> ·
+[9] <a href="https://kubernetes.io/docs/tasks/configure-pod-container/security-context/">Kubernetes: Configure a security context</a> ·
+[10] <a href="https://docs.docker.com/build/concepts/context/">Docker: Build context</a>.
+Commands verified 2026-10-06 on Docker 28.3; the <code>runAsNonRoot</code> behaviour on kind v0.33.0 (node image kindest/node:v1.37.0).</p>
+
+<nav class="pager"><a href="s1-03-first-dockerfile.html">← previous: your first Dockerfile</a><a href="s1-05-why-orchestration.html">next: why orchestration →</a></nav>
+
+</main>
+</body>
+</html>

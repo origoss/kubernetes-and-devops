@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First Dockerfile</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Docker · about 15 minutes · do it after the session</p>
+<h1>Your first Dockerfile</h1>
+
+<div class="win">
+  <strong>Your win:</strong> your own server runs in a container you built from your own Dockerfile, and you can look inside it, read its logs and see its layers.
+</div>
+
+<p class="meta">Before this: your <code>hello</code> repo from lesson 02 (<code>go.mod</code> and <code>main.go</code>), and Docker running (the pre-flight check passed).</p>
+
+<h2>A recipe for an image</h2>
+
+<p>A <strong>Dockerfile</strong> is a recipe: a list of instructions that turn a folder of files into an image.<sup class="cite"><a href="https://docs.docker.com/reference/dockerfile/">[1]</a></sup> You will use five of them:</p>
+
+<ul>
+  <li><code>FROM</code>: the image you start from. Here <code>golang:1.27</code>, which has Go installed.</li>
+  <li><code>WORKDIR</code>: the folder the next instructions work in.</li>
+  <li><code>COPY</code>: copy files from your folder (the <em>build context</em>) into the image.</li>
+  <li><code>RUN</code>: run a command at build time, here the compiler.</li>
+  <li><code>CMD</code>: what to start when a container runs from the image.</li>
+</ul>
+
+<p>Each instruction adds a read-only <strong>layer</strong> on top of the previous one.<sup class="cite"><a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">[2]</a></sup> Layers make rebuilds fast. If an instruction and its input files have not changed, Docker reuses the old layer (<code>CACHED</code>). The first changed step, and every step after it, is rebuilt.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>In your <code>hello</code> folder, next to <code>main.go</code>, save this file. It is deliberately naive: one stage, the whole Go toolchain included. Lesson 04 improves it.</p>
+  <p class="filename">Dockerfile.single</p>
+<pre class="file">FROM golang:1.27
+WORKDIR /src
+COPY . .
+RUN go build -o /server .
+CMD ["/server"]</pre>
+</li>
+
+<li>
+  <p>Build an image from it and name it <code>hello:single</code>. <code>-f</code> picks the file, <code>-t</code> sets the name and tag, and the final <code>.</code> is the build context: the folder Docker may copy from.</p>
+<pre class="cmd">docker build -f Dockerfile.single -t hello:single .</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>[+] Building 8.3s (9/9) FINISHED
+ => [internal] load build definition from Dockerfile.single
+ => [1/4] FROM docker.io/library/golang:1.27@sha256:e0174e51e812...
+ => [internal] load build context
+ => [2/4] WORKDIR /src
+ => [3/4] COPY . .
+ => [4/4] RUN go build -o /server .
+ => exporting to image
+ => => naming to docker.io/library/hello:single</pre>
+  </details>
+</li>
+
+<li>
+  <p>Run a container from it in the background (<code>-d</code>), name it <code>hello</code>, and publish its port 8080 on your laptop's port 8080 (<code>-p laptop:container</code>).<sup class="cite"><a href="https://docs.docker.com/reference/cli/docker/">[3]</a></sup></p>
+<pre class="cmd">docker run -d --name hello -p 8080:8080 hello:single</pre>
+<pre class="cmd">docker ps</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>2182b545124e86c8b5e0d68c0d75aeb7f737f9228c738dc5e1e49cfd58c9e0ce
+CONTAINER ID   IMAGE          COMMAND     CREATED        STATUS        PORTS                                         NAMES
+2182b545124e   hello:single   "/server"   1 second ago   Up 1 second   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp   hello
+ok</pre>
+  </details>
+</li>
+
+<li>
+  <p>Read its logs. Everything your server writes to the terminal is kept by Docker.</p>
+<pre class="cmd">docker logs hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>2026/10/05 22:28:18 listening on :8080</pre>
+  </details>
+</li>
+
+<li>
+  <p>Open a shell <em>inside</em> the running container and look around. This works because the <code>golang</code> image is a full Debian system with a shell. Remember that for lesson 04.</p>
+<pre class="cmd">docker exec -it hello sh</pre>
+<pre># whoami
+root
+# ls
+Dockerfile.single  go.mod  main.go
+# exit</pre>
+  <p>Two surprises. The container runs as <code>root</code>. And <code>COPY . .</code> copied <em>everything</em> in your folder, the Dockerfile too.</p>
+</li>
+
+<li>
+  <p>Stop and remove the container. A stopped container still exists and still holds its name, until you remove it.</p>
+<pre class="cmd">docker stop hello</pre>
+<pre class="cmd">docker rm hello</pre>
+</li>
+
+<li>
+  <p>Configure it from outside, as in lesson 02: tell the server to listen on 9090 <em>inside</em> the container, and publish that on your laptop's 8080.</p>
+<pre class="cmd">docker run -d --name hello -e PORT=9090 -p 8080:9090 hello:single</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+<pre class="cmd">docker logs hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>ok
+2026/10/05 22:28:27 listening on :9090</pre>
+  </details>
+<pre class="cmd">docker rm -f hello</pre>
+  <p class="note"><code>rm -f</code> stops and removes in one go.</p>
+</li>
+
+<li>
+  <p>See the layers your Dockerfile made:</p>
+<pre class="cmd">docker history hello:single</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>IMAGE          CREATED          CREATED BY                                      SIZE
+9331de85b3ce   24 seconds ago   CMD ["/server"]                                 0B
+&lt;missing&gt;      24 seconds ago   RUN /bin/sh -c go build -o /server . # build…   100MB
+&lt;missing&gt;      29 seconds ago   COPY . . # buildkit                             20.5kB
+&lt;missing&gt;      29 seconds ago   WORKDIR /src                                    8.19kB
+&lt;missing&gt;      2 weeks ago      WORKDIR /go                                     4.1kB
+...
+&lt;missing&gt;      2 weeks ago      COPY /target/ / # buildkit                      290MB
+...
+&lt;missing&gt;      2 weeks ago      RUN /bin/sh -c set -eux;  apt-get update;  a…   280MB
+&lt;missing&gt;      2 weeks ago      RUN /bin/sh -c set -eux;  apt-get update;  a…   208MB
+&lt;missing&gt;      2 weeks ago      RUN /bin/sh -c set -eux;  apt-get update;  a…   63.7MB
+&lt;missing&gt;      2 weeks ago      # debian.sh --arch 'arm64' out/ 'trixie' '@1…   156MB</pre>
+  </details>
+  <p>Read it bottom-up. Your four lines sit on top; everything below came with <code>golang:1.27</code>: Debian, build tools, the Go toolchain. Your <code>RUN</code> layer is 100&nbsp;MB, although the server binary is only 8&nbsp;MB. The rest is Go's build cache, which stays in the image for good.</p>
+</li>
+
+<li>
+  <p>Watch the cache work. Add a comment line at the end of <code>main.go</code> (for example <code>// a small change</code>), then build again:</p>
+<pre class="cmd">docker build -f Dockerfile.single -t hello:single .</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>[+] Building 7.7s (9/9) FINISHED
+ => [1/4] FROM docker.io/library/golang:1.27@sha256:e0174e51e812...
+ => [internal] load build context
+ => CACHED [2/4] WORKDIR /src
+ => [3/4] COPY . .
+ => [4/4] RUN go build -o /server .
+ => exporting to image</pre>
+  </details>
+  <p><code>WORKDIR</code> came from cache. <code>COPY . .</code> saw a changed file, so it and everything after it ran again. Build once more without changing anything, and all three steps say <code>CACHED</code>; the build takes under a second.</p>
+</li>
+
+<li>
+  <p>Finally, look at the size:</p>
+<pre class="cmd">docker images hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>REPOSITORY   TAG       IMAGE ID       CREATED         SIZE
+hello        single    bf5871c35369   3 seconds ago   1.43GB</pre>
+  </details>
+  <p><strong>1.43&nbsp;GB to ship an 8&nbsp;MB program.</strong> Every cluster node that runs it must download all of that. Lesson 04 gets it under 20&nbsp;MB. Keep <code>hello:single</code>: lesson 04 compares against it.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You edit only <code>README.md</code> and rebuild <code>Dockerfile.single</code>. Which steps run again?</legend>
+  <button class="opt" data-why="No. COPY . . copies the whole folder, README.md included, so its input did change.">None, because main.go itself did not change at all</button>
+  <button class="opt" data-why="No. Only the steps from the first changed one onwards rerun; FROM and WORKDIR stay cached.">All of them, starting again from the FROM line</button>
+  <button class="opt" data-why="Right. The build context changed, so COPY . . reruns, and every step after it too. Lesson 04 fixes this by copying only what the build needs.">COPY . . and the go build after it</button>
+  <button class="opt" data-why="No. A step never reruns alone: once a layer changes, every layer after it is rebuilt.">Only the go build step, because Go must recompile</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>What does <code>-p 8080:9090</code> mean?</legend>
+  <button class="opt" data-why="Right. Left is your laptop, right is the container: -p host:container.">Laptop port 8080 forwards to container port 9090</button>
+  <button class="opt" data-why="No. It is the other way round: the left side is your laptop.">Container port 8080 forwards to laptop port 9090</button>
+  <button class="opt" data-why="No. -p maps one port to one port; it does not open a range.">The container may use ports 8080 through 9090</button>
+  <button class="opt" data-why="No. -p does not set PORT. The server learns its port only from -e PORT=….">The server is told to switch to 9090</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>You run <code>docker run -d -e PORT=9090 -p 8080:9090 hello:single</code>, then <code>curl localhost:8080/healthz</code>. What comes back?</legend>
+  <button class="opt" data-why="No. Something does listen: the server, on 9090 inside the container, and -p forwards 8080 to it.">Connection refused, because nothing listens on port 8080</button>
+  <button class="opt" data-why="No. Docker passes any -e variable through. It never checks the value against -p.">An error, since Docker rejects ports that differ</button>
+  <button class="opt" data-why="No. The path is /healthz, which has its own handler.">hello from my container, from the catch-all route</button>
+  <button class="opt" data-why="Right. The server listens on 9090 inside, and Docker forwards laptop 8080 there.">ok, forwarded from laptop 8080 to container 9090</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>A stopped container called <code>hello</code> still exists. You run <code>docker run -d --name hello hello:single</code>. What happens?</legend>
+  <button class="opt" data-why="No. docker run always creates a new container. Restarting the old one is docker start.">The stopped container starts again with its old settings</button>
+  <button class="opt" data-why="Right. Conflict. The container name &quot;/hello&quot; is already in use. Remove it first with docker rm hello.">Docker refuses: the name hello is already in use</button>
+  <button class="opt" data-why="No. Docker never silently deletes your containers.">Docker replaces the old container with a new one</button>
+  <button class="opt" data-why="No. Names are unique. Docker would not add a second hello.">A second container named hello runs next to it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why is <code>hello:single</code> about 1.4&nbsp;GB?</legend>
+  <button class="opt" data-why="Right. FROM golang:1.27 brings Debian and the toolchain, and nothing ever removes them. Lesson 04 builds in one stage and ships from another.">It keeps Debian and the Go toolchain it built with</button>
+  <button class="opt" data-why="No. The binary is about 8 MB. history shows where the size really comes from.">Your compiled Go server binary by itself is that large</button>
+  <button class="opt" data-why="No. Docker stores layers compressed and shared. It never duplicates them per image.">Docker stores every layer twice, for safety and for speed</button>
+  <button class="opt" data-why="No. Containers keep their own writes separately. The image size is fixed at build time.">The image grows each time a container runs from it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">Docker: Understanding image layers</a> (10 minutes, with a hands-on). It shows how layers stack, and why the cache rebuilds everything after the first change.
+</div>
+
+<p class="ask">Stuck, or something here doesn't add up? Ask your instructor, or ask in the course channel. Questions are the fastest way through this.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://docs.docker.com/reference/dockerfile/">Docker: Dockerfile reference</a> ·
+[2] <a href="https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/">Docker: Understanding image layers</a> ·
+[3] <a href="https://docs.docker.com/reference/cli/docker/">Docker: CLI reference</a>.
+Commands verified 2026-10-06 on Docker 28.3, golang:1.27 (Go 1.27.1) (macOS).</p>
+
+<nav class="pager"><a href="s1-02-web-server.html">← previous: your web server</a><a href="s1-04-advanced-dockerfile.html">next: advanced Dockerfile →</a></nav>
+
+</main>
+</body>
+</html>

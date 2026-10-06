@@ -40,7 +40,11 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
   A complete Go multi-stage, distroless, non-root example. Use for: the overall pattern. **Stale**: it uses `golang:1.19`, so do not copy the version.
 - [Docs: Docker CLI reference (Docker)](https://docs.docker.com/reference/cli/docker/)
   Primary source for every `docker` command, including on Rancher Desktop with the dockerd engine.
-- [Docs: Container engine settings (Rancher Desktop)](https://docs.rancherdesktop.io/ui/preferences/container-engine/general/)
+- [Docs: Install Docker Desktop on Mac (Docker)](https://docs.docker.com/desktop/setup/install/mac-install/)
+  The course's macOS engine. Free for personal use and education. Use for: macOS setup in the pre-flight lesson.
+- [Docs: Docker Desktop settings (Docker)](https://docs.docker.com/desktop/settings-and-maintenance/settings/)
+  The VM memory limit defaults to 50% of the host's memory, and Kubernetes is off by default. Use for: the memory and Kubernetes checks.
+- [Docs: Container engine settings (Rancher Desktop, optional alternative)](https://docs.rancherdesktop.io/ui/preferences/container-engine/general/)
   Choose **dockerd (moby)** to get the stock `docker` CLI, not containerd with `nerdctl`. Images do not carry over when you switch engines. Use for: the setup notes for Rancher users.
 - [Docs: Kubernetes settings (Rancher Desktop)](https://docs.rancherdesktop.io/ui/preferences/kubernetes/)
   How to disable the built-in k3s to save resources. Use for: telling students to turn it off, since we use kind.
@@ -96,6 +100,18 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
   The concept page explains why; the task page has copyable `httpGet` YAML. **Recommended read** for the probes and limits topic.
 - [Video: "Kubernetes Explained in 100 Seconds" (Fireship)](https://www.youtube.com/watch?v=PziYflu8cB8)
   Optional 2-minute hook only. Never use it as a citation.
+
+### Also cited in lessons (setup and specifics)
+
+- [Docs: Docker Engine install](https://docs.docker.com/engine/install/), [Ubuntu](https://docs.docker.com/engine/install/ubuntu/), [Linux post-install](https://docs.docker.com/engine/install/linux-postinstall/) (Docker). Use for: Linux and WSL2 setup in the pre-flight lesson.
+- [Docs: Rancher Desktop installation (Rancher Desktop)](https://docs.rancherdesktop.io/getting-started/installation/). Use for: macOS setup.
+- [Issue: kind on Rancher Desktop + WSL2 (rancher-desktop#5604)](https://github.com/rancher-sandbox/rancher-desktop/issues/5604). The reason Windows uses Docker Engine inside WSL2.
+- [Docs: Docker Hub usage and limits (Docker)](https://docs.docker.com/docker-hub/usage/). Use for: the pull-rate limit and why to `docker login`.
+- [Docs: docker login](https://docs.docker.com/reference/cli/docker/login/), [docker image tag](https://docs.docker.com/reference/cli/docker/image/tag/), [docker run --restart](https://docs.docker.com/reference/cli/docker/container/run/#restart) (Docker). Use for: exact CLI behaviour.
+- [Docs: Images (Kubernetes)](https://kubernetes.io/docs/concepts/containers/images/). Use for: imagePullPolicy and the `:latest` trap.
+- [Docs: Controllers (Kubernetes)](https://kubernetes.io/docs/concepts/architecture/controller/). Use for: desired state and reconciliation.
+- [Article: The Twelve-Factor App, Config](https://12factor.net/config). Use for: why the port comes from an environment variable.
+- [Site: Retrieval Practice (Agarwal & Bain)](https://www.retrievalpractice.org/). Use for: why the recap quiz is spaced.
 
 ## Wisdom (Communities)
 

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Write the YAML</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Kubernetes · about 20 minutes · read after the session</p>
+<h1>Write it down: your first manifests</h1>
+
+<div class="win">
+  <strong>Your win:</strong> <code>k8s/deployment.yaml</code> and <code>k8s/service.yaml</code>, written by hand for your own server, applied, scaled, self-healing, updated to a new version and rolled back, and committed to your repo.
+</div>
+
+<p class="meta">Before this: lesson 07, so your <code>hello</code> Deployment and Service are running, created by commands.</p>
+
+<h2>Commands forget, files remember</h2>
+
+<p>In lesson 07 you <em>told</em> the cluster what to do, one command at a time. That works, but the only record of what you want now lives inside the cluster. Nobody can review it, and you cannot rebuild it on a fresh cluster without remembering every flag.</p>
+
+<p>The declarative way is to write the desired state into files and let <code>kubectl apply</code> make the cluster match them. Run it once and it creates. Run it again with an edited file and it changes only what differs. Run it with nothing changed and it does nothing. The files go into git next to your code, so every change is reviewed and dated.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
+
+<h2>Four fields, every time</h2>
+
+<p>Every Kubernetes object you write has the same skeleton:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">[1]</a></sup></p>
+
+<ul>
+  <li><code>apiVersion</code> and <code>kind</code>: which type of object. A Deployment is <code>apps/v1</code>, a Service is plain <code>v1</code>.</li>
+  <li><code>metadata</code>: at least a <code>name</code>, usually some <code>labels</code>.</li>
+  <li><code>spec</code>: the state you want.</li>
+</ul>
+
+<p>There is a fifth, <code>status</code>, but you never write it. The cluster fills it in with the state it has actually reached.</p>
+
+<h2>Labels hold it all together</h2>
+
+<p>Objects find each other by <strong>labels</strong>, not by name. A Deployment has a <code>selector</code> that says "my Pods are the ones labelled <code>app: hello</code>", and a Pod <code>template</code> that stamps that same label on every Pod it creates. If the two disagree, the Deployment would create Pods it can never count as its own, and keep creating more. So the API refuses such a Deployment outright.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup></p>
+
+<p>The Service uses the same trick: its <code>selector</code> picks every Pod labelled <code>app: hello</code>, whoever made it. Here a mismatch is <em>not</em> refused. You simply get a Service with nobody behind it.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/service/">[3]</a></sup></p>
+
+<h2>Do it</h2>
+
+<p>Work in the root of your app repo.</p>
+
+<ol class="steps">
+<li>
+  <p>Delete the objects you made by command in lesson 07, so the files start from a clean slate.</p>
+<pre class="cmd">kubectl delete deployment,service hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps "hello" deleted from default namespace
+service "hello" deleted from default namespace</pre>
+  </details>
+</li>
+
+<li>
+  <p>Let <code>kubectl</code> show you the shape of a Deployment without creating anything. <code>--dry-run=client</code> means "do not send it", and <code>-o yaml</code> prints what it would have sent.</p>
+<pre class="cmd">kubectl create deployment hello --image=hello:0.1.0 --dry-run=client -o yaml</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: hello
+  name: hello
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+      - image: hello:0.1.0
+        name: hello
+        resources: {}
+status: {}</pre>
+  </details>
+  <p>Find the four fields, and the empty <code>status</code>. The <code>{}</code> lines are empty placeholders you can drop. Use this trick whenever you forget the shape of an object, but write your own file: typing it is how the structure sticks.</p>
+</li>
+
+<li>
+  <p>Create <code>k8s/deployment.yaml</code>. Two replicas, and the <code>containerPort</code> your server listens on.</p>
+  <p class="filename">k8s/deployment.yaml</p>
+<pre class="file">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello          # "my Pods are the ones labelled app: hello"
+  template:               # the Pod to stamp out, replicas times
+    metadata:
+      labels:
+        app: hello        # must match the selector above
+    spec:
+      containers:
+        - name: hello
+          image: hello:0.1.0
+          ports:
+            - containerPort: 8080</pre>
+  <p class="note">Indent with spaces, never tabs. In YAML, indentation is the structure. <code>containerPort</code> is documentation: it does not open or change any port. Your server decides that through <code>PORT</code>.</p>
+</li>
+
+<li>
+  <p>Create <code>k8s/service.yaml</code>.</p>
+  <p class="filename">k8s/service.yaml</p>
+<pre class="file">apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  selector:
+    app: hello            # send traffic to Pods with this label
+  ports:
+    - port: 80            # the Service listens here
+      targetPort: 8080    # your container listens here</pre>
+</li>
+
+<li>
+  <p>Apply the whole folder, and look at what you got.</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl get deploy,rs,pod,svc -l app=hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello created
+service/hello created
+NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/hello   2/2     2            2           5s
+
+NAME                              DESIRED   CURRENT   READY   AGE
+replicaset.apps/hello-7dd649b7d   2         2         2       5s
+
+NAME                        READY   STATUS    RESTARTS   AGE
+pod/hello-7dd649b7d-ml2pb   1/1     Running   0          5s
+pod/hello-7dd649b7d-vltzz   1/1     Running   0          5s
+
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/hello   ClusterIP   10.96.145.194   &lt;none&gt;        80/TCP    5s</pre>
+  </details>
+  <p><code>-l app=hello</code> filters by label, the same way the selectors do. Now apply a second time, without changing anything:</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello unchanged
+service/hello unchanged</pre>
+  </details>
+</li>
+
+<li>
+  <p>Check it answers, exactly as in lesson 07: port-forward in one terminal, <code>curl</code> in another, <kbd>Ctrl</kbd>+<kbd>C</kbd> when done.</p>
+<pre class="cmd">kubectl port-forward service/hello 8080:80</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+  <details class="expect"><summary>Expected output (second terminal)</summary>
+<pre>ok</pre>
+  </details>
+</li>
+
+<li>
+  <p>Now see why the file has to win. Scale up by command, then apply the file again.</p>
+<pre class="cmd">kubectl scale deployment hello --replicas=3</pre>
+<pre class="cmd">kubectl get deploy hello</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl get deploy hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello scaled
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+hello   3/3     3            3           15s
+deployment.apps/hello configured
+service/hello unchanged
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+hello   2/2     2            2           18s</pre>
+  </details>
+  <p><code>kubectl scale</code> changed the cluster but not your file. That gap between what is running and what is written down is called <strong>drift</strong>.<sup class="cite"><a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_scale/">[4]</a></sup> The next <code>apply</code> quietly put it back to 2, and your third replica was gone. Imperative changes last only until the next apply.</p>
+  <p class="note"><code>kubectl diff -f k8s/</code> shows the drift before you apply: after the scale, it prints <code>-  replicas: 3</code> / <code>+  replicas: 2</code>.</p>
+</li>
+
+<li>
+  <p>Do it the declarative way instead. Edit <code>k8s/deployment.yaml</code> to say <code>replicas: 3</code>, then apply.</p>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl get deploy hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello configured
+service/hello unchanged
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+hello   3/3     3            3           22s</pre>
+  </details>
+  <p>Same result as <code>kubectl scale</code>, but now the file says it, the next apply keeps it, and git will remember it.</p>
+</li>
+
+<li>
+  <p>Watch self-healing. Start a watch in one terminal:</p>
+<pre class="cmd">kubectl get pods -l app=hello -w</pre>
+  <p>In the second terminal, delete one Pod (use a name from your list):</p>
+<pre class="cmd">kubectl delete pod hello-7dd649b7d-j2cv8</pre>
+  <details class="expect"><summary>Expected output (the watch terminal, trimmed)</summary>
+<pre>NAME                    READY   STATUS    RESTARTS   AGE
+hello-7dd649b7d-j2cv8   1/1     Running   0          3s
+hello-7dd649b7d-ml2pb   1/1     Running   0          22s
+hello-7dd649b7d-vltzz   1/1     Running   0          22s
+hello-7dd649b7d-j2cv8   1/1     Terminating   0          6s
+hello-7dd649b7d-85cl2   0/1     Pending       0          0s
+hello-7dd649b7d-85cl2   0/1     ContainerCreating   0          0s
+hello-7dd649b7d-j2cv8   0/1     Error               0          6s
+hello-7dd649b7d-85cl2   1/1     Running             0          0s</pre>
+  </details>
+  <p>The replacement <code>85cl2</code> was <code>Pending</code> in the same instant the old Pod started <code>Terminating</code>, and running within a second. Stop the watch with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+  <p class="note">Why does the old Pod say <code>Error</code> on its way out? Kubernetes stops a container by sending it the <code>SIGTERM</code> signal. Your server does not handle that signal, so it dies with a non-zero exit code. That is harmless here.</p>
+</li>
+
+<li>
+  <p>Ship a new version. Change the greeting in <code>main.go</code> to <code>hello from version 0.1.1</code>, then build it under a new tag and copy it into the cluster, as in lesson 06:</p>
+<pre class="cmd">docker build -t hello:0.1.1 .</pre>
+<pre class="cmd">kind load docker-image hello:0.1.1</pre>
+  <p>In <code>k8s/deployment.yaml</code>, change <code>image: hello:0.1.0</code> to <code>image: hello:0.1.1</code>. Preview, apply, and watch the rollout:</p>
+<pre class="cmd">kubectl diff -f k8s/</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl rollout status deployment/hello</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>-      - image: hello:0.1.0
++      - image: hello:0.1.1
+deployment.apps/hello configured
+service/hello unchanged
+Waiting for deployment "hello" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "hello" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "hello" rollout to finish: 1 old replicas are pending termination...
+deployment "hello" successfully rolled out</pre>
+  </details>
+  <p>This is a <strong>rolling update</strong>: the Deployment starts new Pods and stops old ones a few at a time, so some Pods answer during the whole change.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">[5]</a></sup> It does that with a second ReplicaSet:</p>
+<pre class="cmd">kubectl get rs -l app=hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME               DESIRED   CURRENT   READY   AGE
+hello-646b86479c   3         3         3       1s
+hello-7dd649b7d    0         0         0       21s</pre>
+  </details>
+  <p>The old ReplicaSet is kept, scaled to 0: that is what makes a rollback possible. Restart your port-forward (it was attached to a Pod that is now gone) and check: <code>curl localhost:8080/</code> answers <code>hello from version 0.1.1</code>.</p>
+</li>
+
+<li>
+  <p>Now ship a broken version. Pretend you mistyped the tag, and this time change it by command:</p>
+<pre class="cmd">kubectl set image deployment/hello hello=hello:0.1.2</pre>
+<pre class="cmd">kubectl rollout status deployment/hello --timeout=30s</pre>
+<pre class="cmd">kubectl get pods -l app=hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello image updated
+Waiting for deployment "hello" rollout to finish: 1 out of 3 new replicas have been updated...
+error: timed out waiting for the condition
+NAME                     READY   STATUS             RESTARTS   AGE
+hello-646b86479c-4d8gv   1/1     Running            0          33s
+hello-646b86479c-fdz67   1/1     Running            0          34s
+hello-646b86479c-t2bz8   1/1     Running            0          34s
+hello-6d746f67f6-54f25   0/1     ImagePullBackOff   0          31s</pre>
+  </details>
+  <p>No image <code>hello:0.1.2</code> exists, so the new Pod is stuck in <code>ImagePullBackOff</code>. The rollout stops there and waits: it never removes an old Pod before a new one is ready. Your three 0.1.1 Pods keep serving.</p>
+</li>
+
+<li>
+  <p>Roll back. List the revisions, then undo the last one:</p>
+<pre class="cmd">kubectl rollout history deployment/hello</pre>
+<pre class="cmd">kubectl rollout undo deployment/hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello
+REVISION  CHANGE-CAUSE
+1         &lt;none&gt;
+2         &lt;none&gt;
+3         &lt;none&gt;
+
+Warning: resource deployments/hello was previously managed with 'kubectl apply'. Rolling back will not update the kubectl.kubernetes.io/last-applied-configuration annotation, which may cause unexpected behavior on future 'kubectl apply' operations. Consider using 'kubectl apply' with your previous configuration file instead.
+deployment.apps/hello rolled back</pre>
+  </details>
+  <p>The broken Pod is removed, and the Deployment is back on 0.1.1.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment">[6]</a></sup> Read the warning: it says what this lesson keeps saying. <code>set image</code> and <code>undo</code> are commands, so the file did not see them. Here it ends well, because your file still says 0.1.1: <code>kubectl diff -f k8s/</code> now prints nothing. In real work, <code>undo</code> is the emergency brake; the lasting fix goes into the file.</p>
+</li>
+
+<li>
+  <p>Commit the manifests. They are now the source of truth for how your server runs.</p>
+<pre class="cmd">git add k8s/ main.go</pre>
+<pre class="cmd">git commit -m "Add Kubernetes Deployment and Service, ship 0.1.1"</pre>
+<pre class="cmd">git push</pre>
+  <p>Leave everything running for lesson 09.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>Your Deployment's <code>selector</code> says <code>app: hello</code>, but the <code>template</code> labels say <code>app: web</code>. What does <code>kubectl apply</code> do?</legend>
+  <button class="opt" data-why="No. The API checks this before anything is created, so no Pods ever exist.">Creates the Deployment, but its Pods stay Pending forever</button>
+  <button class="opt" data-why="No. Kubernetes never edits your labels for you. It rejects the object instead.">Creates it and quietly rewrites the labels to match</button>
+  <button class="opt" data-why="Right. The message is: spec.template.metadata.labels: Invalid value: {&quot;app&quot;:&quot;web&quot;}: `selector` does not match template `labels`.">Refuses it: the selector does not match template labels</button>
+  <button class="opt" data-why="No. That would be the runaway case the check exists to prevent.">Creates Pods without end, because it never finds any</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>A Service's selector says <code>app: helo</code> (typo); your Pods say <code>app: hello</code>. What happens?</legend>
+  <button class="opt" data-why="Right. No events, no errors. describe shows an empty Endpoints line, and port-forward hangs for a minute, then says: error: timed out waiting for the condition.">Service is created, has no endpoints, and port-forward times out</button>
+  <button class="opt" data-why="No. Unlike the Deployment check, the API cannot know which labels you meant. Any selector is valid.">apply refuses the Service because no Pod carries that label</button>
+  <button class="opt" data-why="No. Selectors are exact. One wrong letter matches nothing.">Service still finds the Pods, since the label is close</button>
+  <button class="opt" data-why="No. A Service never touches Pods. It only selects them.">Service relabels the running Pods to app: helo for you</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>The file says <code>replicas: 3</code>. You run <code>kubectl scale deployment hello --replicas=5</code>, then <code>kubectl apply -f k8s/</code>. How many Pods run?</legend>
+  <button class="opt" data-why="No. scale does not write to your file, so the file still says 3.">Five, because scale also updated the file on disk</button>
+  <button class="opt" data-why="No. apply sets the value from the file. It does not add numbers together.">Eight, because apply adds three more to the five</button>
+  <button class="opt" data-why="No. apply cannot know your intention. It just makes the cluster match the file.">Five, because apply leaves changes made by commands alone</button>
+  <button class="opt" data-why="Right. apply makes the cluster match the file, so the drift is undone and two Pods go away.">Three, because apply resets the cluster to the file</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>Why must a Deployment's template labels match its selector?</legend>
+  <button class="opt" data-why="No. The Service has its own selector. This rule is about the Deployment alone.">So that the Service can find the Deployment by name</button>
+  <button class="opt" data-why="Right. The ReplicaSet counts the Pods that match the selector. Pods it made must match, or it would never see them.">So that Pods it creates are counted as its own</button>
+  <button class="opt" data-why="No. Names come from the Deployment name plus hashes. Labels do not affect them.">So that the Pods get predictable names on every restart</button>
+  <button class="opt" data-why="No. The scheduler places Pods by resources and rules, not by this selector.">So that the scheduler puts all Pods on one node</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>Nothing has changed since your last <code>kubectl apply -f k8s/</code>. You run it again. What does it print?</legend>
+  <button class="opt" data-why="No. created appears only the first time an object is made.">deployment.apps/hello created, and then service/hello created too</button>
+  <button class="opt" data-why="No. apply is safe to repeat. That is one of its main strengths.">An error, because the objects already exist</button>
+  <button class="opt" data-why="Right. apply compares, finds nothing to do, and says so.">deployment.apps/hello unchanged, and then service/hello unchanged too</button>
+  <button class="opt" data-why="No. configured means something changed. With no difference, nothing is restarted.">deployment.apps/hello configured, and all Pods are restarted</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>Three Pods run 0.1.1. You set the image to a tag that does not exist. What do users of the Service see?</legend>
+  <button class="opt" data-why="No. The rollout never removes an old Pod before a new one is ready, and the new one never gets ready.">Errors, because all Pods are replaced by the broken one</button>
+  <button class="opt" data-why="Right. One new Pod sits in ImagePullBackOff, the rollout waits, and the three old Pods keep answering.">No change, because the three old Pods keep serving 0.1.1</button>
+  <button class="opt" data-why="No. Kubernetes never rolls back on its own. The rollout just stops and waits for you.">A short outage, then Kubernetes rolls back to 0.1.1 automatically</button>
+  <button class="opt" data-why="No. The image name is not checked when you change it. It fails later, when the node tries to pull it.">An error, because kubectl refuses a tag that is missing</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Kubernetes: Objects in Kubernetes</a>. It explains spec versus status and the required fields you just used, and links to the pages on labels and on declarative management. About ten minutes.
+</div>
+
+<p class="ask">YAML error you cannot decode? Paste the exact message in the course channel, or bring it to your instructor. The error usually names the line.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Kubernetes: Objects in Kubernetes</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Kubernetes: Deployments</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Kubernetes: Service</a> ·
+[4] <a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_scale/">kubectl scale</a> ·
+[5] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">Kubernetes: Updating a Deployment</a> ·
+[6] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment">Kubernetes: Rolling back a Deployment</a>.
+Commands verified 2026-10-06 on kind v0.33.0 (node image kindest/node:v1.37.0), kubectl 1.37.1 and Docker 28.3 (macOS).</p>
+
+<nav class="pager"><a href="s1-07-pod-deployment-service.html">← previous: Pod, Deployment, Service</a><a href="s1-09-requests-limits.html">next: requests and limits →</a></nav>
+
+</main>
+</body>
+</html>

@@ -10,7 +10,7 @@
 <body>
 <main>
 
-<p class="crumbs">Session 1 · Containerization · about 10 minutes · read before the session</p>
+<p class="crumbs">Session 1 · Containerization · about 15 minutes · read before the session</p>
 <h1>Why containers?</h1>
 
 <div class="win">
@@ -71,9 +71,36 @@
 
 <h2>Images and containers</h2>
 
-<p>You already know this from programming: an <strong>image</strong> is the <em>class</em>, a <strong>container</strong> is an <em>object</em>. The image is a read-only package: files plus a note on what to run.<sup class="cite"><a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">[4]</a></sup> Every <code>docker run</code> creates a new container from it, each with its own process and its own scratch space. Images live in a <strong>registry</strong>; Docker Hub is the default one, and in lesson 05 you push to your own on GitHub.</p>
+<p>You already know this from programming: an <strong>image</strong> is the <em>class</em>, a <strong>container</strong> is an <em>object</em>. The image is a read-only package: files plus a note on what to run.<sup class="cite"><a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">[4]</a></sup> Every <code>docker run</code> creates a new container from it, each with its own process and its own scratch space. Images live in a <strong>registry</strong>; Docker Hub is the default one, and in session 2 you push to your own on GitHub.</p>
 
 <p>Images follow an open standard, the OCI image format.<sup class="cite"><a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">[5]</a></sup> That is why an image you build with Docker runs unchanged in Kubernetes, which does not use Docker at all.</p>
+
+<h2>How we got here</h2>
+
+<p>Docker did not invent containers. The kernel features came first, piece by piece, years before anyone called the result a "container":</p>
+
+<table>
+  <thead><tr><th>Year</th><th>What happened</th></tr></thead>
+  <tbody>
+    <tr><td>2002</td><td>Linux 2.4.19 adds the first namespace, for mount points.<sup class="cite"><a href="https://man7.org/linux/man-pages/man7/mount_namespaces.7.html">[6]</a></sup> Other namespaces (processes, network, users…) followed over the next decade.</td></tr>
+    <tr><td>2008</td><td>Linux 2.6.24 adds cgroups.<sup class="cite"><a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">[3]</a></sup><sup class="cite"><a href="https://kernelnewbies.org/Linux_2_6_24">[7]</a></sup> Tools such as <strong>LXC</strong> combine both into lightweight Linux systems "without the need for a separate kernel".<sup class="cite"><a href="https://linuxcontainers.org/lxc/introduction/">[8]</a></sup></td></tr>
+    <tr><td>2013</td><td><strong>Docker</strong> 0.1 is released in March,<sup class="cite"><a href="https://github.com/moby/moby/releases/tag/v0.1.0">[9]</a></sup> introduced in a five-minute talk called <em>The future of Linux Containers</em>.<sup class="cite"><a href="https://www.youtube.com/watch?v=wW9CAH9nSLs">[10]</a></sup> At first it runs containers <em>through</em> LXC.</td></tr>
+    <tr><td>2014</td><td>Docker 0.9 adds its own runtime library, <code>libcontainer</code>, as the new default, with LXC still available as an option.<sup class="cite"><a href="https://www.docker.com/blog/docker-0-9-introducing-execution-drivers-and-libcontainer/">[11]</a></sup></td></tr>
+    <tr><td>2015</td><td>The <strong>Open Container Initiative</strong> is launched on 22 June by Docker, CoreOS and other container companies.<sup class="cite"><a href="https://opencontainers.org/about/overview/">[12]</a></sup></td></tr>
+    <tr><td>2017</td><td>The OCI image specification reaches version 1.0.<sup class="cite"><a href="https://github.com/opencontainers/image-spec/releases/tag/v1.0.0">[13]</a></sup></td></tr>
+    <tr><td>2022</td><td>Kubernetes 1.24 removes its built-in Docker support ("dockershim") and talks to runtimes like containerd directly.<sup class="cite"><a href="https://kubernetes.io/docs/tasks/administer-cluster/migrating-from-dockershim/">[14]</a></sup> Images built with Docker keep working, because they are OCI images.</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Why Docker took off.</strong> Isolation already existed. What Docker added was the <em>image</em>: a Dockerfile describes how to build it, a registry stores it, and one short command runs the same thing on any Linux machine. Containers went from a sysadmin trick to something every developer could use.</p>
+
+<p><strong>Why a standard in 2015.</strong> Container tools were multiplying fast, and each could have shipped its own image format and runtime behaviour. An image built with one tool might then not run with another. The OCI fixed this with open specifications: a <em>runtime spec</em> (how to run a container), an <em>image spec</em> (what an image is) and, later, a <em>distribution spec</em> (how registries serve images). Docker donated its runtime code to the effort, which became <code>runc</code>.<sup class="cite"><a href="https://opencontainers.org/about/overview/">[12]</a></sup> Because of the OCI, the tool that <em>builds</em> an image and the tool that <em>runs</em> it no longer need to be the same.</p>
+
+<h3>Docker is not the only tool</h3>
+<ul>
+  <li><strong>Podman</strong> is a daemonless, open-source tool for running and building OCI containers. It can run containers rootless, and its commands match Docker's so closely that "most users can simply alias Docker to Podman".<sup class="cite"><a href="https://docs.podman.io/en/latest/">[15]</a></sup> If you use it, most commands in this course work with <code>podman</code> in place of <code>docker</code>. We teach Docker because kind, CI runners and most tutorials assume it.</li>
+  <li><strong>containerd</strong> is the industry-standard runtime underneath Docker. It is a graduated CNCF project and is what runs containers inside most Kubernetes clusters, including the kind cluster you build in lesson 05.<sup class="cite"><a href="https://containerd.io/">[16]</a></sup></li>
+</ul>
 
 <h2>Do it</h2>
 
@@ -124,20 +151,20 @@ Python 3.13.16</pre>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
-<fieldset class="quiz-q" data-answer="0">
+<fieldset class="quiz-q" data-answer="3">
   <legend><span class="kind">Concept</span>You run <code>docker run python:3.13-slim</code> three times. What exists afterwards (without <code>--rm</code>)?</legend>
-  <button class="opt" data-why="Right. Class and objects: one image, three instances.">One image, three containers, each with its own process</button>
   <button class="opt" data-why="No. The image is downloaded once and reused. Every run makes a new container.">Three images, one container that the three runs share</button>
   <button class="opt" data-why="No. Images are not copied per run. That is the point of a read-only image.">Three images and three containers, one pair per run</button>
   <button class="opt" data-why="No. docker run always creates a new container. Restarting an old one is docker start.">One image and one container, restarted three separate times</button>
+  <button class="opt" data-why="Right. Class and objects: one image, three instances.">One image, three containers, each with its own process</button>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
-<fieldset class="quiz-q" data-answer="0">
+<fieldset class="quiz-q" data-answer="2">
   <legend><span class="kind">Predict the output</span><code>docker run --rm alpine ps</code> lists only <code>ps</code>, as PID 1. Why?</legend>
-  <button class="opt" data-why="Right. The PID namespace gives the container its own process tree, starting at 1.">The PID namespace gives the container its own numbering</button>
   <button class="opt" data-why="No. Alpine is just files. Numbering comes from the kernel.">Alpine Linux always starts every program as PID 1</button>
   <button class="opt" data-why="No. Your laptop's processes keep running. The container simply cannot see them.">Docker kills every other process on the host first</button>
+  <button class="opt" data-why="Right. The PID namespace gives the container its own process tree, starting at 1.">The PID namespace gives the container its own numbering</button>
   <button class="opt" data-why="No. ps would list processes it can see even without permission to read them. These simply are not in its namespace.">ps hides processes it is not allowed to read</button>
   <div class="why" aria-live="polite"></div>
 </fieldset>
@@ -160,6 +187,24 @@ Python 3.13.16</pre>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Why was the Open Container Initiative founded in 2015?</legend>
+  <button class="opt" data-why="No. Namespaces stayed exactly as they were. The OCI standardises formats, not kernel features.">To replace Linux namespaces with a faster isolation mechanism</button>
+  <button class="opt" data-why="No. Licensing has nothing to do with the OCI.">To make Docker Desktop free for students and schools</button>
+  <button class="opt" data-why="No. The OCI is about container formats and runtimes, not Kubernetes governance.">To move Kubernetes development away from the Google company</button>
+  <button class="opt" data-why="Right. Open runtime and image specs mean an image built by one tool runs with any other OCI tool.">So images and runtimes from different vendors stay compatible</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>What is Podman's biggest design difference from Docker?</legend>
+  <button class="opt" data-why="Right. Docker's CLI talks to a long-running daemon. Podman starts containers directly, and can do it rootless.">It runs containers without a central background daemon process</button>
+  <button class="opt" data-why="No. Podman is a Linux-native tool for Linux containers.">It runs only Windows containers, never Linux based ones</button>
+  <button class="opt" data-why="No. Podman uses OCI images, the same ones Docker builds.">It uses its own image format, incompatible with OCI</button>
+  <button class="opt" data-why="No. Podman runs containers on its own, with no cluster involved.">It needs a Kubernetes cluster to run any container</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
 <p class="quiz-score"></p>
 
 <h2>Go further</h2>
@@ -176,10 +221,21 @@ Python 3.13.16</pre>
 [2] <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">namespaces(7)</a> ·
 [3] <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">cgroups(7)</a> ·
 [4] <a href="https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/">Docker: What is an image?</a> ·
-[5] <a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">OCI Image Format Specification</a>.
+[5] <a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">OCI Image Format Specification</a> ·
+[6] <a href="https://man7.org/linux/man-pages/man7/mount_namespaces.7.html">mount_namespaces(7)</a> ·
+[7] <a href="https://kernelnewbies.org/Linux_2_6_24">Kernel Newbies: Linux 2.6.24</a> ·
+[8] <a href="https://linuxcontainers.org/lxc/introduction/">LXC: Introduction</a> ·
+[9] <a href="https://github.com/moby/moby/releases/tag/v0.1.0">Docker v0.1.0 release (2013-03-26)</a> ·
+[10] <a href="https://www.youtube.com/watch?v=wW9CAH9nSLs">Solomon Hykes, "The future of Linux Containers"</a> ·
+[11] <a href="https://www.docker.com/blog/docker-0-9-introducing-execution-drivers-and-libcontainer/">Docker blog: Docker 0.9 and libcontainer</a> ·
+[12] <a href="https://opencontainers.org/about/overview/">OCI: About</a> ·
+[13] <a href="https://github.com/opencontainers/image-spec/releases/tag/v1.0.0">OCI image-spec v1.0.0 (2017-07-19)</a> ·
+[14] <a href="https://kubernetes.io/docs/tasks/administer-cluster/migrating-from-dockershim/">Kubernetes: Migrating from dockershim</a> ·
+[15] <a href="https://docs.podman.io/en/latest/">Podman documentation</a> ·
+[16] <a href="https://containerd.io/">containerd</a>.
 Commands verified 2026-10-06 on Docker 28.3 (macOS).</p>
 
-<nav class="pager"><span class="off">← pre-flight check</span><span class="off">next: your web server →</span></nav>
+<nav class="pager"><a href="s1-00-preflight.html">← previous: pre-flight check</a><a href="s1-02-web-server.html">next: your web server →</a></nav>
 
 </main>
 </body>

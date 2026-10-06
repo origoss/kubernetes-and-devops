@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session 1 Recap</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Review · about 12 minutes · before session 2</p>
+<h1>Session 1, from memory</h1>
+
+<div class="win">
+  <strong>Your win:</strong> proof that session 1 stuck. You'll also know exactly which lessons to reread before session 2.
+</div>
+
+<p class="meta">Do this a few days after session 1, not right after it. Recalling something you have half-forgotten is what makes it stick, so the effort is the point.<sup class="cite"><a href="https://www.retrievalpractice.org/">[1]</a></sup> No notes, no terminal. The questions are mixed on purpose, not in lesson order.</p>
+
+<h2>Fifteen questions</h2>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s1-06-looking-with-kubectl.html">Lesson 06</a> · Concept</span>A Pod sits in <code>Pending</code>. Which command shows you why, first?</legend>
+  <button class="opt" data-why="Right. A Pending Pod never started a container. The scheduler's reason is in the Events at the bottom of describe.">kubectl describe pod, then read the Events at the bottom</button>
+  <button class="opt" data-why="No. A Pending Pod has not started any container, so there are no logs yet.">kubectl logs, because the container already printed why it waits</button>
+  <button class="opt" data-why="No. A Pending Pod has no container anywhere yet, and kind's pods run in containerd, not your laptop's Docker.">docker ps on the laptop, because pods are just containers</button>
+  <button class="opt" data-why="No. Pending usually means no node can fit or accept the Pod, not that a node died.">kubectl get nodes, since Pending always means a node died</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s1-06-looking-with-kubectl.html">Lesson 06</a> · Predict the output</span>You tag your image <code>hello:latest</code>, <code>kind load</code> it, and deploy. Pods show <code>ErrImagePull</code>. Why?</legend>
+  <button class="opt" data-why="No. kind load has no size limit like that.">kind load only works for images smaller than 100MB</button>
+  <button class="opt" data-why="No. A loaded image stays in the node until you delete it or the cluster.">kind forgets loaded images tagged latest after one day</button>
+  <button class="opt" data-why="Right. With :latest the default imagePullPolicy is Always, so the node tries the registry and skips your loaded copy. Use a version tag like 0.1.0.">:latest makes Kubernetes always pull, ignoring the loaded copy</button>
+  <button class="opt" data-why="No. Images follow the OCI standard, so any runtime can run them.">Kubernetes cannot run images that were built by Docker</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s1-07-pod-deployment-service.html">Lesson 07</a> · Predict the output</span>You delete one Pod of the <code>hello</code> Deployment. A minute later?</legend>
+  <button class="opt" data-why="That is a bare Pod with no controller. A Deployment's ReplicaSet replaces it.">It is gone for good until you apply again</button>
+  <button class="opt" data-why="No. Deleting a Pod never deletes its owner.">The whole Deployment is deleted along with that Pod</button>
+  <button class="opt" data-why="No. Pods are never resurrected. The replacement is a new object with a new name and a new IP.">The same Pod comes back with its old name</button>
+  <button class="opt" data-why="Right. The ReplicaSet sees 2 of 3 and creates a new Pod. That is reconciliation.">A new Pod with a new name replaced it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s1-01-why-containers.html">Lesson 01</a> · Concept</span>A container goes over its memory limit. Who kills it?</legend>
+  <button class="opt" data-why="No. Docker only asks the kernel to set the limit.">Docker Desktop, which watches every container's memory use</button>
+  <button class="opt" data-why="Right. cgroups set how much a process may use, and the kernel enforces it.">the Linux kernel, enforcing the cgroup memory limit</button>
+  <button class="opt" data-why="No. Namespaces decide what a process can see, not how much it can use.">the namespace, which hides memory it cannot see</button>
+  <button class="opt" data-why="No. An image holds files. Limits are set at run time.">the image, which stores a maximum memory size</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s1-04-advanced-dockerfile.html">Lesson 04</a> · Concept</span><code>docker exec -it hello sh</code> worked on <code>hello:single</code> but fails on <code>hello:multi</code>. Why?</legend>
+  <button class="opt" data-why="No. The container is running fine. The error says sh was not found.">the container had crashed before exec could attach</button>
+  <button class="opt" data-why="No. Nothing like that exists. exec works fine on any image that has a shell.">multi-stage builds disable docker exec for safety reasons</button>
+  <button class="opt" data-why="No. The error is 'not found', not 'permission denied'.">the nonroot user is forbidden from starting shells</button>
+  <button class="opt" data-why="Right. The golang base image has a full Debian with a shell, while distroless/static has only your binary.">distroless has no shell; the golang image does</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s1-04-advanced-dockerfile.html">Lesson 04</a> · Predict the output</span>Your image says <code>EXPOSE 8080</code>. You run <code>docker run -d hello:multi</code>, with no <code>-p</code>. What does <code>curl localhost:8080</code> on your laptop get?</legend>
+  <button class="opt" data-why="No. EXPOSE only records the port in the image. Nothing is published without -p or -P.">hello from my container, because EXPOSE published that port</button>
+  <button class="opt" data-why="No. The server starts and listens inside the container. Only the way in from your laptop is missing.">nothing, because the server waits for a published port</button>
+  <button class="opt" data-why="Right. Exposed is not published. Nothing listens on your laptop's port 8080, so the connection is refused.">connection refused, because an exposed port is not published</button>
+  <button class="opt" data-why="No. -P would pick a random port, but you did not pass -P either.">a reply on some random port that Docker picked</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s1-04-advanced-dockerfile.html">Lesson 04</a> · Concept</span>A file is written into the named volume <code>hello-data</code>. Then you run <code>docker rm -f hello</code>. Where is the file?</legend>
+  <button class="opt" data-why="Right. A volume lives outside the container. Only docker volume rm deletes it.">still in hello-data, until you remove the volume</button>
+  <button class="opt" data-why="No. A named volume survives the container. That is the whole point of a volume.">gone, together with the container's own writable layer</button>
+  <button class="opt" data-why="No. A container never writes into its image. Images are read-only.">saved back into the hello:multi image you built</button>
+  <button class="opt" data-why="No. Docker keeps volumes until you remove them, across restarts too.">kept only until Docker restarts on your laptop</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s1-08-write-the-yaml.html">Lesson 08</a> · Concept</span>A new version is stuck in <code>ImagePullBackOff</code>. Which command brings the Deployment back to the previous version fastest?</legend>
+  <button class="opt" data-why="No. Deleting the broken Pod only makes the ReplicaSet create another broken one.">kubectl delete pod, aimed at the broken one</button>
+  <button class="opt" data-why="No. Scaling changes how many Pods run, not which version they run.">kubectl scale deployment hello down to zero replicas</button>
+  <button class="opt" data-why="No. rollout status only watches. It changes nothing.">kubectl rollout status deployment/hello with a longer timeout</button>
+  <button class="opt" data-why="Right. undo switches back to the previous ReplicaSet. Then fix the file, so the next apply does not undo the undo.">kubectl rollout undo deployment/hello, then fix the file</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s1-03-first-dockerfile.html">Lesson 03</a> · Predict the output</span>With lesson 03's <code>Dockerfile.single</code> (<code>COPY . .</code>, no <code>.dockerignore</code> yet), you add a <code>README.md</code> and rebuild. What reruns?</legend>
+  <button class="opt" data-why="No. COPY . . copies the whole folder, and Docker notices any change in it.">Nothing; Docker ignores files the program never reads</button>
+  <button class="opt" data-why="Right. The COPY step's input changed, so it and every later step rebuild, including the slow go build. Lesson 04's .dockerignore and narrower COPY fix exactly this.">The COPY step and every step after it</button>
+  <button class="opt" data-why="No. FROM only changes when the base image changes.">Only FROM, because the base image has changed</button>
+  <button class="opt" data-why="No. The steps before the changed one stay cached.">Everything, since any change empties the whole cache</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s1-02-web-server.html">Lesson 02</a> · Predict the output</span><code>curl -X POST localhost:8080/healthz</code> against your server prints?</legend>
+  <button class="opt" data-why="No. The path is registered. Only the method does not match.">404 Not Found, since no POST handler was registered</button>
+  <button class="opt" data-why="Close, but no. GET / catches unknown paths, but /healthz is a known path with the wrong method.">hello from my container, because GET / matches everything</button>
+  <button class="opt" data-why="Right. Go 1.22+ method patterns answer 405 and send an Allow: GET, HEAD header.">405 Method Not Allowed, since the route says GET</button>
+  <button class="opt" data-why="No. The pattern is 'GET /healthz', so other methods are refused.">ok, because health checks accept requests with any method</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s1-05-why-orchestration.html">Lesson 05</a> · Concept</span>Inside the <code>kind-control-plane</code> node, what runs your Pods' containers?</legend>
+  <button class="opt" data-why="No. kubectl only talks to the API server.">kubectl itself, which starts processes on each node</button>
+  <button class="opt" data-why="Right. crictl ps lists them, and docker is not even installed in the node. Your Docker-built OCI images run unchanged.">containerd, via the CRI; there is no Docker</button>
+  <button class="opt" data-why="No. The node is a Docker container on your laptop, but the Pods inside it run on containerd.">your laptop's Docker daemon, shared into every node</button>
+  <button class="opt" data-why="No. Containers are processes, not VMs. That was lesson 01.">a small virtual machine started for every pod</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s1-08-write-the-yaml.html">Lesson 08</a> · Concept</span>Your Service has <code>port: 80</code> and <code>targetPort: 8080</code>. What is 8080?</legend>
+  <button class="opt" data-why="Right. traffic → Service:80 → Pod:8080, where your server listens.">the port your container listens on inside the pod</button>
+  <button class="opt" data-why="No. The laptop side is whatever you pick in port-forward.">the port your browser opens on your own laptop</button>
+  <button class="opt" data-why="No. That is port: 80.">the port that the Service itself answers on, in-cluster</button>
+  <button class="opt" data-why="No. NodePorts are a different Service type, and we have not used them.">the node port opened on every node of kind</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s1-09-requests-limits.html">Lesson 09</a> · Predict the output</span>You set <code>limits.memory: 2Mi</code> (and a matching request) on <code>hello</code>. <code>kubectl get pods</code> shows?</legend>
+  <button class="opt" data-why="No. 2Mi is easy to schedule. The trouble starts when the container starts.">Pending, because no node has exactly 2Mi free</button>
+  <button class="opt" data-why="Tempting, but no. The container dies while it is still starting, so get shows RunContainerError. describe says 'container init was OOM-killed'.">OOMKilled, every time, with exit code 137 shown</button>
+  <button class="opt" data-why="No. The limit is enforced from the first byte.">Running, because limits only matter under heavy load</button>
+  <button class="opt" data-why="Right. The kernel kills it during start-up, and the kubelet retries with growing delays.">RunContainerError, then CrashLoopBackOff as the restarts slow down</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s1-09-requests-limits.html">Lesson 09</a> · Predict the output</span>You set <code>requests.memory: 100Gi</code> (and a matching limit). What happens?</legend>
+  <button class="opt" data-why="No. The Pod never gets a node, so it never runs.">Running, until the kernel kills it for greed</button>
+  <button class="opt" data-why="No. 100Gi is a perfectly valid quantity.">Rejected by the API as an invalid value</button>
+  <button class="opt" data-why="Right. describe shows FailedScheduling: '0/1 nodes are available: 1 Insufficient memory.'">Pending, since no node can offer that much</button>
+  <button class="opt" data-why="No. The scheduler treats requests as a hard reservation.">Scheduled anyway; requests are only a gentle hint</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s1-08-write-the-yaml.html">Lesson 08</a> · Predict the output</span>A new Deployment has selector <code>app: hello</code> but template labels <code>app: web</code>. <code>kubectl apply</code> says?</legend>
+  <button class="opt" data-why="No. Kubernetes never edits your labels for you.">Accepted, and Kubernetes rewrites the labels to match</button>
+  <button class="opt" data-why="No. The API rejects it before anything is stored.">Accepted, but the Deployment never creates any Pods</button>
+  <button class="opt" data-why="No. The API catches this exact mistake up front.">Accepted; Pods start but the Deployment ignores them</button>
+  <button class="opt" data-why="Right. The error says `selector` does not match template `labels`.">Rejected: the selector does not match template labels</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Now what?</h2>
+
+<p>For every question you missed on the first try, reread the lesson linked above it, then answer that question again tomorrow. Bring whatever is still unclear to session 2.</p>
+
+<p class="ask">Something still doesn't add up? Ask your instructor. A question asked before session 2 saves you an hour during it.</p>
+
+<p class="meta">Sources: [1] <a href="https://www.retrievalpractice.org/">Retrieval Practice (Agarwal &amp; Bain)</a>. Every answer here comes from the linked lesson, where it was verified.</p>
+
+<nav class="pager"><a href="s1-09-requests-limits.html">← requests &amp; limits</a><a href="s2-01-push-ghcr.html">next: session 2, push to GHCR →</a></nav>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Looking with kubectl</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Kubernetes · about 15 minutes · read after the session</p>
+<h1>Four verbs to find out what is wrong</h1>
+
+<div class="win">
+  <strong>Your win:</strong> you can find out why anything in a cluster is unhappy, using four verbs: <code>get</code>, <code>describe</code>, <code>logs</code> and <code>events</code>.
+</div>
+
+<p class="meta">Before this: your kind cluster from lesson 05 is running, and <code>kubectl get nodes</code> shows <code>kind-control-plane</code> as <code>Ready</code>. You have the <code>hello:multi</code> image from <a href="s1-04-advanced-dockerfile.html">lesson 04</a>.</p>
+
+<h2>Nobody shows you an error dialog</h2>
+
+<p>In Kubernetes you declare what you want, and controllers keep trying to make it true. When something goes wrong, nothing pops up and nothing crashes in your terminal. The cluster just keeps trying, and it writes down what it tried. Your job is to read that record.</p>
+
+<p>Four verbs cover almost every case. Each one answers a different question:<sup class="cite"><a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/">[1]</a></sup></p>
+
+<ul>
+  <li><strong><code>kubectl get</code></strong>: <em>What exists, and what state is it in?</em> Add <code>-A</code> for all namespaces, <code>-o wide</code> for extra columns such as the node and the IP, and <code>-w</code> to keep watching for changes.<sup class="cite"><a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/">[2]</a></sup></li>
+  <li><strong><code>kubectl describe</code></strong>: <em>What does the cluster know about this one object, and what happened to it?</em> It ends with the object's <strong>Events</strong>.<sup class="cite"><a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_describe/">[3]</a></sup></li>
+  <li><strong><code>kubectl logs</code></strong>: <em>What did my program print?</em> Add <code>--previous</code> to see the run <em>before</em> the last restart.<sup class="cite"><a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/">[4]</a></sup></li>
+  <li><strong><code>kubectl events</code></strong>: <em>What happened recently?</em> Add <code>--for pod/NAME</code> to see one object's story.<sup class="cite"><a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_events/">[5]</a></sup></li>
+</ul>
+
+<p>The order matters. Start with <code>get</code> to find the unhappy object. Then <code>describe</code> it. Reach for <code>logs</code> only once a container has actually started: a container that never ran has nothing to print.</p>
+
+<h2>Read the Events bottom-up</h2>
+
+<p>If you learn one skill today, make it this one. The Events table at the end of <code>describe</code> lists the oldest event at the top and the newest at the bottom. So read it from the bottom:</p>
+
+<ol>
+  <li>The <strong>last line</strong> says what is going on <em>now</em>, for example "back-off".</li>
+  <li>Walk <strong>up</strong> to the first <code>Warning</code> with a real message. That line usually names the cause.</li>
+  <li><code>(x4 over 2m)</code> means the same event happened four times. Repetition means "still broken, still retrying".</li>
+</ol>
+
+<p class="note">Events are short-lived: the cluster deletes old ones after a while. On a pod that has been healthy for hours, <code>Events: &lt;none&gt;</code> is normal, not a bug.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Look at everything running in the cluster, in all namespaces.</p>
+<pre class="cmd">kubectl get pods -A</pre>
+  <details class="expect"><summary>Expected output (name suffixes and ages differ)</summary>
+<pre>NAMESPACE            NAME                                         READY   STATUS    RESTARTS   AGE
+kube-system          coredns-559f6c778d-bgl74                     1/1     Running   0          12s
+kube-system          coredns-559f6c778d-psxpm                     1/1     Running   0          12s
+kube-system          etcd-kind-control-plane                      1/1     Running   0          21s
+kube-system          kindnet-zg95x                                1/1     Running   0          13s
+kube-system          kube-apiserver-kind-control-plane            1/1     Running   0          21s
+kube-system          kube-controller-manager-kind-control-plane   1/1     Running   0          20s
+kube-system          kube-proxy-pd9vv                             1/1     Running   0          13s
+kube-system          kube-scheduler-kind-control-plane            1/1     Running   0          20s
+local-path-storage   local-path-provisioner-75f7fc7dc5-vt5pj      1/1     Running   0          12s</pre>
+  </details>
+  <p>Without <code>-A</code> you only see the <code>default</code> namespace, which is empty so far. Try <code>kubectl get pods</code> and you get <code>No resources found in default namespace.</code></p>
+  <p><code>READY 1/1</code> means one of one containers is ready. <code>RESTARTS</code> counts how often a container has died and been started again. A climbing number there is always worth a look.</p>
+</li>
+
+<li>
+  <p>Get more columns for one namespace.</p>
+<pre class="cmd">kubectl get pods -n kube-system -o wide</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAME                       READY   STATUS    RESTARTS   AGE   IP           NODE                 ...
+coredns-559f6c778d-bgl74   1/1     Running   0          13s   10.244.0.2   kind-control-plane   ...
+coredns-559f6c778d-psxpm   1/1     Running   0          13s   10.244.0.4   kind-control-plane   ...
+etcd-kind-control-plane    1/1     Running   0          22s   172.18.0.3   kind-control-plane   ...</pre>
+  </details>
+  <p>Now you can see which node each pod runs on and its IP. With one node the answer is always the same, but on a real cluster this is how you spot "everything broken lives on node 3".</p>
+</li>
+
+<li>
+  <p>Describe one of the CoreDNS pods, the cluster's internal DNS server. Copy a name from your own output (Tab completion works if you set it up).</p>
+<pre class="cmd">kubectl describe pod -n kube-system coredns-559f6c778d-bgl74</pre>
+  <details class="expect"><summary>Expected output (trimmed to the parts that matter today)</summary>
+<pre>Name:                 coredns-559f6c778d-bgl74
+Namespace:            kube-system
+Node:                 kind-control-plane/172.18.0.3
+Status:               Running
+Controlled By:  ReplicaSet/coredns-559f6c778d
+Containers:
+  coredns:
+    Image:         registry.k8s.io/coredns/coredns:v1.14.6
+    State:          Running
+    Ready:          True
+    Restart Count:  0
+...
+Events:
+  Type     Reason            Age   From               Message
+  ----     ------            ----  ----               -------
+  Warning  FailedScheduling  20s   default-scheduler  0/1 nodes are available: 1 node(s) had untolerated taint(s). ...
+  Normal   Scheduled         10s   default-scheduler  Successfully assigned kube-system/coredns-559f6c778d-bgl74 to kind-control-plane
+  Normal   Pulled            9s    kubelet            spec.containers{coredns}: Container image "registry.k8s.io/coredns/coredns:v1.14.6" already present on machine ...
+  Normal   Created           9s    kubelet            spec.containers{coredns}: Container created
+  Normal   Started           9s    kubelet            spec.containers{coredns}: Container started
+  Warning  Unhealthy         9s    kubelet            spec.containers{coredns}: Readiness probe failed: Get "http://10.244.0.2:8181/ready": dial tcp 10.244.0.2:8181: connect: connection refused</pre>
+  </details>
+  <p>Practise reading bottom-up on a healthy pod. The two warnings are start-up noise: at first the node was not ready yet, and the readiness check ran a moment before the server listened. The pod is <code>Running</code> and <code>Ready: True</code>, so both problems went away by themselves. A warning only matters if it is still happening. If your cluster is older than an hour or so, you will probably see <code>Events: &lt;none&gt;</code> instead.</p>
+</li>
+
+<li>
+  <p>Read what the CoreDNS program printed.</p>
+<pre class="cmd">kubectl logs -n kube-system coredns-559f6c778d-bgl74</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>maxprocs: Leaving GOMAXPROCS=12: CPU quota undefined
+.:53
+[INFO] plugin/reload: Running configuration SHA512 = 1b226df7...
+CoreDNS-1.14.6
+linux/arm64, go1.26.5, 424d125</pre>
+  </details>
+  <p>Logs are whatever the program writes to stdout and stderr. Kubernetes adds nothing to them.</p>
+</li>
+
+<li>
+  <p>Bring your own image into the cluster. The kind node cannot see the images in your laptop's Docker: it runs its own containerd. Give your image a version tag, then copy it into the node with <code>kind load</code>.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster">[6]</a></sup></p>
+<pre class="cmd">docker tag hello:multi hello:0.1.0</pre>
+<pre class="cmd">kind load docker-image hello:0.1.0</pre>
+<pre class="cmd">docker exec kind-control-plane crictl images | grep hello</pre>
+  <details class="expect"><summary>Expected output (your IDs differ)</summary>
+<pre>Image: "hello:0.1.0" with ID "sha256:3025392c4a53d39676a08aaa88cb753b1bbae7680f96a176787bc2cfff506610" not yet present on node "kind-control-plane", loading...
+docker.io/library/hello                         0.1.0                6da0c4b727f58       5.35MB</pre>
+  </details>
+  <p>Inside the node your image is listed as <code>docker.io/library/hello</code>. A name without a registry means Docker Hub, and containerd writes the full name out.</p>
+  <p class="note"><strong>Why <code>0.1.0</code> and never <code>latest</code>?</strong> For an image tagged <code>:latest</code>, or with no tag at all, the default pull policy is <code>Always</code>: every start asks the registry, and the copy you loaded is ignored. For any other tag the default is <code>IfNotPresent</code>, so the loaded copy is used.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/containers/images/">[7]</a></sup> kind's docs warn about exactly this.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster">[6]</a></sup> With <code>hello:latest</code> your Pod would end in <code>ImagePullBackOff</code>.</p>
+</li>
+
+<li>
+  <p>Now break something on purpose. Start a pod from a tag you never loaded, and watch it. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop watching after about 20 seconds.</p>
+<pre class="cmd">kubectl run broken --image=hello:0.0.0-doesnotexist</pre>
+<pre class="cmd">kubectl get pods -w</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>pod/broken created
+NAME     READY   STATUS              RESTARTS   AGE
+broken   0/1     ContainerCreating   0          0s
+broken   0/1     ErrImagePull        0          1s
+broken   0/1     ImagePullBackOff    0          16s</pre>
+  </details>
+  <p><code>ErrImagePull</code> is the first failure. <code>ImagePullBackOff</code> means "I failed, and I am waiting longer and longer before the next try". The pod does not give up, and it does not tell you why. For that you need the next verb.</p>
+</li>
+
+<li>
+  <p>Describe it, then read the Events bottom-up.</p>
+<pre class="cmd">kubectl describe pod broken</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>Name:             broken
+Status:           Pending
+Containers:
+  broken:
+    Image:          hello:0.0.0-doesnotexist
+    State:          Waiting
+      Reason:       ImagePullBackOff
+    Ready:          False
+    Restart Count:  0
+...
+Events:
+  Type     Reason     Age               From               Message
+  ----     ------     ----              ----               -------
+  Normal   Scheduled  25s               default-scheduler  Successfully assigned default/broken to kind-control-plane
+  Normal   BackOff    24s               kubelet            spec.containers{broken}: Back-off pulling image "hello:0.0.0-doesnotexist"
+  Warning  Failed     24s               kubelet            spec.containers{broken}: Error: ImagePullBackOff
+  Normal   Pulling    9s (x2 over 25s)  kubelet            spec.containers{broken}: Pulling image "hello:0.0.0-doesnotexist"
+  Warning  Failed     8s (x2 over 24s)  kubelet            spec.containers{broken}: Failed to pull image "hello:0.0.0-doesnotexist": failed to pull and unpack image "docker.io/library/hello:0.0.0-doesnotexist": failed to resolve reference "docker.io/library/hello:0.0.0-doesnotexist": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+  Warning  Failed     8s (x2 over 24s)  kubelet            spec.containers{broken}: Error: ErrImagePull</pre>
+  </details>
+  <p>Bottom line: <code>ErrImagePull</code>, the symptom. One line up is the first <code>Failed</code> with a long message, and there is the cause. The node has no image called <code>hello:0.0.0-doesnotexist</code>, so containerd asked Docker Hub for <code>docker.io/library/hello</code>, and Docker Hub answered <code>pull access denied, repository does not exist</code>. Fix the tag and the pod recovers.</p>
+  <p class="note">You will meet this exact message again: it is what you get when you forget <code>kind load</code>, or use <code>:latest</code>. The node looks for an image that only exists on your laptop.</p>
+</li>
+
+<li>
+  <p>Try the other two verbs on the same pod.</p>
+<pre class="cmd">kubectl logs broken</pre>
+<pre class="cmd">kubectl events --for pod/broken</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>Error from server (BadRequest): container "broken" in pod "broken" is waiting to start: trying and failing to pull image
+LAST SEEN          TYPE      REASON      OBJECT       MESSAGE
+25s                Normal    Scheduled   Pod/broken   Successfully assigned default/broken to kind-control-plane
+24s                Normal    BackOff     Pod/broken   Back-off pulling image "hello:0.0.0-doesnotexist"
+24s                Warning   Failed      Pod/broken   Error: ImagePullBackOff
+9s (x2 over 25s)   Normal    Pulling     Pod/broken   Pulling image "hello:0.0.0-doesnotexist"
+8s (x2 over 24s)   Warning   Failed      Pod/broken   Failed to pull image ...: pull access denied, repository does not exist ...
+8s (x2 over 24s)   Warning   Failed      Pod/broken   Error: ErrImagePull</pre>
+  </details>
+  <p><code>logs</code> has nothing: the container never started, so your program never printed a line. <code>events</code> shows the same story as the bottom of <code>describe</code>, without the rest.</p>
+</li>
+
+<li>
+  <p>Now a pod whose image is fine but whose program crashes. Your server reads its port from <code>PORT</code>, so give it nonsense.</p>
+<pre class="cmd">kubectl run crashy --image=hello:0.1.0 --env=PORT=notaport</pre>
+  <p>Wait half a minute, then:</p>
+<pre class="cmd">kubectl get pod crashy</pre>
+<pre class="cmd">kubectl logs crashy</pre>
+  <details class="expect"><summary>Expected output (the status flips between Error and CrashLoopBackOff)</summary>
+<pre>NAME     READY   STATUS   RESTARTS      AGE
+crashy   0/1     Error    2 (34s ago)   35s
+2026/10/06 08:33:52 listening on :notaport
+2026/10/06 08:33:52 listen tcp: lookup tcp/notaport: unknown port</pre>
+  </details>
+  <p>This time <code>logs</code> is the verb that answers. <code>CrashLoopBackOff</code> means "it started, it died, I restarted it, it died again, and now I wait before the next try". The cause is in your own program's output.</p>
+</li>
+
+<li>
+  <p>One more case. Sometimes a container crashes, gets restarted, and is <code>Running</code> again when you look. The current logs then show only the fresh start. <code>--previous</code> shows the run that died. This pod prints a line, waits 15 seconds and exits with an error:</p>
+<pre class="cmd">kubectl run flaky --image=busybox:1.37 -- sh -c 'echo "started at $(date +%T)"; sleep 15; echo "giving up"; exit 1'</pre>
+  <p>Wait about 20 seconds, so that it has restarted once, then compare:</p>
+<pre class="cmd">kubectl logs flaky</pre>
+<pre class="cmd">kubectl logs flaky --previous</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>started at 22:31:34
+started at 22:31:19
+giving up</pre>
+  </details>
+  <p>The first command shows the new run, which has not failed yet. The second shows the old run, including its last words.</p>
+</li>
+
+<li>
+  <p>Clean up all three.</p>
+<pre class="cmd">kubectl delete pod broken crashy flaky</pre>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You run a pod with an image tag that does not exist. Which <code>STATUS</code> values does <code>kubectl get pods -w</code> show, in order?</legend>
+  <button class="opt" data-why="No. CrashLoopBackOff needs a container that started and then died. This one never started.">ContainerCreating, then Error, and then CrashLoopBackOff</button>
+  <button class="opt" data-why="No. The pod is scheduled fine, so it leaves Pending. Pulling the image is what fails.">Pending, then Pending, then still Pending</button>
+  <button class="opt" data-why="Right. The first pull fails (ErrImagePull), then kubelet waits longer between retries (ImagePullBackOff).">ContainerCreating, then ErrImagePull, and then ImagePullBackOff</button>
+  <button class="opt" data-why="No. Kubernetes never gives up and deletes the pod. It keeps retrying with back-off.">ErrImagePull, then the pod is deleted</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>The pod <code>broken</code> is in <code>ImagePullBackOff</code>. What does <code>kubectl logs broken</code> print?</legend>
+  <button class="opt" data-why="Right. The container never started, so there is no output to show. describe or events has the reason.">An error: the container is still waiting to start</button>
+  <button class="opt" data-why="No. The registry error is in the Events, not in the logs. Logs are only what your program prints.">The registry's access denied error from the image pull</button>
+  <button class="opt" data-why="No. Your program never ran, so it never printed that line.">The listening on :8080 line printed by your server</button>
+  <button class="opt" data-why="No. There is no previous run either. Nothing has ever started.">The logs of the last run before the failure</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>The Events table under <code>describe</code> has twelve lines. Where do you start reading?</legend>
+  <button class="opt" data-why="No. The top is the oldest event, often just Scheduled. It tells you how it started, not what is wrong now.">At the top, because the first event matters most</button>
+  <button class="opt" data-why="No. Normal events say things went to plan. The clues are in the Warnings.">At the Normal events, which show progress so far</button>
+  <button class="opt" data-why="No. The From column says which component reported it. It is useful, but it is not where you start.">At the From column, to find the guilty component</button>
+  <button class="opt" data-why="Right. The newest event is at the bottom. Then walk up to the first Warning with a real message.">At the bottom, then upward to the first Warning</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>A pod shows <code>CrashLoopBackOff</code> with <code>RESTARTS 5</code>. Which verb most likely shows the cause?</legend>
+  <button class="opt" data-why="No. get tells you that it crashes, which you already know. It does not say why.">kubectl get pods, for the restart count</button>
+  <button class="opt" data-why="Right. The container did start, so your program printed something before it died. Use --previous if it is running again.">kubectl logs, for what the program printed</button>
+  <button class="opt" data-why="No. The image was pulled fine, otherwise it would be ImagePullBackOff.">kubectl describe, for an image pull error</button>
+  <button class="opt" data-why="No. Your cluster has one node, and this is not a scheduling problem.">kubectl get nodes, for a broken node</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>What does <code>kubectl logs flaky --previous</code> show?</legend>
+  <button class="opt" data-why="No. The previous run is a single container run, not a merge of all of them.">Every log line from all the runs, oldest first</button>
+  <button class="opt" data-why="No. That is the plain kubectl logs flaky without the flag.">The output of the run that is running now</button>
+  <button class="opt" data-why="Right. It is the run before the last restart, so you see the last words of the one that died.">The output of the run that died last time</button>
+  <button class="opt" data-why="No. The events are a separate record. Use describe or kubectl events for them.">The events of the pod from before it restarted</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span><code>kubectl get pods</code> says <code>No resources found</code>, but CoreDNS is clearly running. Why?</legend>
+  <button class="opt" data-why="Right. Without -n or -A, kubectl only looks in the default namespace. CoreDNS lives in kube-system.">It looks only in default; CoreDNS lives in kube-system</button>
+  <button class="opt" data-why="No. System pods are listed like any other pod. You just have to look in their namespace.">System pods are hidden from get and need describe</button>
+  <button class="opt" data-why="No. CoreDNS runs as pods too, two of them on your cluster.">CoreDNS is a process inside the node, not pods</button>
+  <button class="opt" data-why="No. Your kubeconfig points at your kind cluster. The namespace is the issue.">kubectl is talking to the wrong cluster by default</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/">Kubernetes: Debug Pods</a>. It walks through Pending, Waiting and crashing pods with exactly these verbs. Ten minutes, and you will use it again in the fault hunt.
+</div>
+
+<p class="ask">Stuck on an Events table you cannot read? Paste it in the course channel or bring it to your instructor. Reading them together is how this skill grows.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/">Kubernetes: Debug Pods</a> ·
+[2] <a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/">kubectl get</a> ·
+[3] <a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_describe/">kubectl describe</a> ·
+[4] <a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/">kubectl logs</a> ·
+[5] <a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_events/">kubectl events</a> ·
+[6] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster">kind: Quick Start, loading an image</a> ·
+[7] <a href="https://kubernetes.io/docs/concepts/containers/images/">Kubernetes: Images</a>.
+Commands verified 2026-10-06 on kind 0.32.0 with node image kindest/node:v1.37.0, kubectl 1.36.1 and Docker 28.3 (macOS). The image steps (tag, <code>kind load</code>, <code>broken</code>, <code>crashy</code>) re-verified 2026-10-06 on kind v0.33.0, kubectl 1.37.1 and Docker 28.3 (macOS).</p>
+
+<nav class="pager"><a href="s1-05-why-orchestration.html">← previous: why orchestration</a><a href="s1-07-pod-deployment-service.html">next: Pod, Deployment, Service →</a></nav>
+
+</main>
+</body>
+</html>

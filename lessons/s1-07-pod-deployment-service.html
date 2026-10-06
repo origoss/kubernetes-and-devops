@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pod, Deployment, Service</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 1 · Kubernetes · about 15 minutes · read after the session</p>
+<h1>Your server, running in Kubernetes</h1>
+
+<div class="win">
+  <strong>Your win:</strong> your own image runs in Kubernetes, heals itself when you kill it, and answers in your browser. You built it all with three commands.
+</div>
+
+<p class="meta">Before this: your kind cluster is running, <code>hello:0.1.0</code> is loaded into it, and you can read a pod's Events (all from <a href="s1-06-looking-with-kubectl.html">lesson 06</a>).</p>
+
+<h2>Pod: the smallest thing Kubernetes runs</h2>
+
+<p>Kubernetes does not run containers directly. It runs <strong>Pods</strong>: one or more containers that share a network address and are always scheduled together. Most Pods hold exactly one container, as yours will.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/pods/">[1]</a></sup></p>
+
+<p>A Pod on its own is like <code>docker run</code>: if it dies or you delete it, nobody brings it back. Lesson 05 promised a controller that keeps the actual state equal to the desired state. A bare Pod has no such controller.</p>
+
+<h2>Deployment → ReplicaSet → Pod</h2>
+
+<p>A <strong>Deployment</strong> is where you write down what you want: "keep this many Pods from this template running".<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">[2]</a></sup> It does not make Pods itself. It creates a <strong>ReplicaSet</strong>, whose only job is to keep the right number of matching Pods alive. One too few, and it creates one.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/">[3]</a></sup> You will see all three objects in step 3, and their names give the chain away: <code>hello</code> → <code>hello-6f4569fc87</code> → <code>hello-6f4569fc87-7d8zn</code>.</p>
+
+<p>Why two layers? When you change the image, the Deployment makes a <em>new</em> ReplicaSet and shifts Pods over gradually. For today, one Deployment means one ReplicaSet.</p>
+
+<h2>Service: a stable address for changing Pods</h2>
+
+<p>Every new Pod gets a new name and a new IP. Something that talks to your server cannot chase those. A <strong>Service</strong> gives a set of Pods one stable name and one stable IP, and forwards traffic to whichever Pods currently match its <em>selector</em>.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/services-networking/service/">[4]</a></sup></p>
+
+<p>A Service has two ports. <code>port</code> is the one the Service itself listens on; we use 80, the usual HTTP port. <code>targetPort</code> is where the container listens, which for your server is 8080.</p>
+
+<p class="note">Your laptop is outside the cluster network, because kind runs the whole cluster inside a Docker container. <code>kubectl port-forward</code> opens a tunnel from a port on your laptop into the cluster, which is all you need for testing.<sup class="cite"><a href="https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/">[5]</a></sup></p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Run your image as a bare Pod, and check that your server started.</p>
+<pre class="cmd">kubectl run hello --image=hello:0.1.0</pre>
+<pre class="cmd">kubectl get pods -o wide</pre>
+<pre class="cmd">kubectl logs hello</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>pod/hello created
+NAME    READY   STATUS    RESTARTS   AGE   IP           NODE                 ...
+hello   1/1     Running   0          5s    10.244.0.8   kind-control-plane   ...
+2026/10/06 08:34:43 listening on :8080</pre>
+  </details>
+  <p>The node pulled nothing. It already had <code>hello:0.1.0</code>, because you loaded it in lesson 06, and with a tag other than <code>:latest</code> the pull policy is <code>IfNotPresent</code>, so it uses that copy.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup> <code>kubectl describe pod hello</code> says so in its Events: <code>Container image "hello:0.1.0" already present on machine</code>.</p>
+  <p class="note"><strong><code>ErrImagePull</code> instead?</strong> Run <code>kubectl describe pod hello</code> and read the Events. <code>pull access denied</code> for <code>docker.io/library/hello</code> means the node does not have your image. That happens after you recreate the cluster, too. Load it again with <code>kind load docker-image hello:0.1.0</code>, then <code>kubectl delete pod hello</code> and run it again.</p>
+</li>
+
+<li>
+  <p>Now delete it, and look again.</p>
+<pre class="cmd">kubectl delete pod hello</pre>
+<pre class="cmd">kubectl get pods</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>pod "hello" deleted from default namespace
+No resources found in default namespace.</pre>
+  </details>
+  <p>Gone, for good. Wait as long as you like: nothing will bring it back, because nothing was watching it.</p>
+</li>
+
+<li>
+  <p>Do the same with a Deployment, and list all three kinds of objects at once.</p>
+<pre class="cmd">kubectl create deployment hello --image=hello:0.1.0</pre>
+<pre class="cmd">kubectl get deploy,rs,pod</pre>
+  <details class="expect"><summary>Expected output (the hash suffixes differ)</summary>
+<pre>deployment.apps/hello created
+NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/hello   1/1     1            1           5s
+
+NAME                               DESIRED   CURRENT   READY   AGE
+replicaset.apps/hello-6f4569fc87   1         1         1       5s
+
+NAME                         READY   STATUS    RESTARTS   AGE
+pod/hello-6f4569fc87-7d8zn   1/1     Running   0          5s</pre>
+  </details>
+  <p>Read the chain: the ReplicaSet wants 1 (<code>DESIRED</code>), has 1 (<code>CURRENT</code>), and 1 is ready. <code>kubectl describe pod</code> on the Pod shows <code>Controlled By:  ReplicaSet/hello-6f4569fc87</code>.</p>
+</li>
+
+<li>
+  <p>Delete the Pod again. Use your own Pod name.</p>
+<pre class="cmd">kubectl delete pod hello-6f4569fc87-7d8zn</pre>
+<pre class="cmd">kubectl get pods</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>pod "hello-6f4569fc87-7d8zn" deleted from default namespace
+NAME                     READY   STATUS    RESTARTS   AGE
+hello-6f4569fc87-cdhhf   1/1     Running   0          1s</pre>
+  </details>
+  <p>Look at the name and the age. This is a <em>new</em> Pod, one second old. The ReplicaSet saw "desired 1, current 0" and made one. That is the controller loop from lesson 05, live.</p>
+</li>
+
+<li>
+  <p>Put a Service in front of the Deployment. It listens on port 80 and forwards to port 8080 in the container.</p>
+<pre class="cmd">kubectl expose deployment hello --port=80 --target-port=8080</pre>
+<pre class="cmd">kubectl describe service hello</pre>
+  <details class="expect"><summary>Expected output (trimmed; your IPs differ)</summary>
+<pre>service/hello exposed
+Name:                     hello
+Selector:                 app=hello
+Type:                     ClusterIP
+IP:                       10.96.159.192
+Port:                     &lt;unset&gt;  80/TCP
+TargetPort:               8080/TCP
+Endpoints:                10.244.0.10:8080
+...</pre>
+  </details>
+  <p><code>Selector: app=hello</code> is how the Service finds its Pods: <code>kubectl create deployment</code> gave them the label <code>app=hello</code>. <code>Endpoints</code> lists the Pod IPs it found, on the target port. Delete the Pod once more and the Endpoints line changes to the new Pod's IP, while the Service IP stays put.</p>
+</li>
+
+<li>
+  <p>Open a tunnel from your laptop's port 8080 to the Service's port 80. This command keeps running, so leave it there.</p>
+<pre class="cmd">kubectl port-forward service/hello 8080:80</pre>
+  <p>In a <strong>second terminal</strong>:</p>
+<pre class="cmd">curl localhost:8080/</pre>
+<pre class="cmd">curl localhost:8080/healthz</pre>
+  <details class="expect"><summary>Expected output (first terminal, then second)</summary>
+<pre>Forwarding from 127.0.0.1:8080 -> 8080
+Forwarding from [::1]:8080 -> 8080
+Handling connection for 8080
+Handling connection for 8080
+
+hello from my container
+ok</pre>
+  </details>
+  <p>Now open <a href="http://localhost:8080/">http://localhost:8080/</a> in your browser. That is your code, from your repo, in your image, running in Kubernetes. Stop the tunnel with <kbd>Ctrl</kbd>+<kbd>C</kbd> when you are done.</p>
+  <p class="note">Notice <code>-&gt; 8080</code> in the first line. Port-forward to a Service picks one of its Pods and connects straight to that Pod's target port. It is a testing tool, not a load balancer.</p>
+  <p class="note">Port 8080 already in use on your laptop? An old <code>docker run</code> may still hold it (<code>docker ps</code>). Or pick another local port: <code>kubectl port-forward service/hello 9090:80</code> and <code>curl localhost:9090/</code>.</p>
+</li>
+
+<li>
+  <p>Leave the Deployment and the Service running. Lesson 08 starts by deleting them and rebuilding both from files you write yourself.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>You created a Pod with <code>kubectl run hello</code>. You delete it and wait a minute. What does <code>kubectl get pods</code> show?</legend>
+  <button class="opt" data-why="No. That is what a Deployment does. A bare Pod has no controller watching it.">A new hello Pod with a fresh random name</button>
+  <button class="opt" data-why="Right. Nothing owns a bare Pod, so nothing recreates it. Deleted means gone.">No resources found, because nothing ever recreates the Pod</button>
+  <button class="opt" data-why="No. delete really deletes. Terminating lasts only a moment.">The hello Pod, stuck in Terminating state for good</button>
+  <button class="opt" data-why="No. RESTARTS counts container restarts inside one Pod. A deleted Pod is not restarted.">The same hello Pod with RESTARTS set to 1</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>Your Deployment <code>hello</code> has one Pod, <code>hello-6f4569fc87-7d8zn</code>. You delete that Pod. What does <code>kubectl get pods</code> show a second later?</legend>
+  <button class="opt" data-why="No. The ReplicaSet notices at once that it has zero of one, and acts.">No resources found, until you recreate the Deployment</button>
+  <button class="opt" data-why="No. Pod names are never reused. A replacement is a new Pod with a new name.">The same hello-6f4569fc87-7d8zn Pod, restarted by the kubelet</button>
+  <button class="opt" data-why="No. Deleting a Pod does not touch the Deployment or the ReplicaSet.">An error, because the Deployment owns that Pod</button>
+  <button class="opt" data-why="Right. Same ReplicaSet hash, new suffix, age about one second.">A fresh Pod with another name, seconds old</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why put a Service in front of the Pods instead of using a Pod's IP?</legend>
+  <button class="opt" data-why="Right. Pods come and go with new IPs. The Service keeps one name and IP and tracks the current Pods through its selector.">Pods get replaced with new IPs; the Service stays put</button>
+  <button class="opt" data-why="No. A ClusterIP Service is reachable only inside the cluster. You still needed port-forward.">A Service makes the Pods reachable from the whole internet</button>
+  <button class="opt" data-why="No. A Service only routes traffic. The ReplicaSet is what restarts Pods.">The Service restarts any Pods that stop answering on time</button>
+  <button class="opt" data-why="No. Pod IPs are real and work inside the cluster. They just do not last.">Pod IPs only work for traffic coming from the node</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>In <code>kubectl expose deployment hello --port=80 --target-port=8080</code>, what is 8080?</legend>
+  <button class="opt" data-why="No. That is whatever you choose in port-forward, the 8080 before the colon.">The laptop port that you open in the browser</button>
+  <button class="opt" data-why="No. That is --port, 80 here.">The port number that the Service itself listens on</button>
+  <button class="opt" data-why="Right. targetPort is where traffic ends up: the port your server listens on in the container.">The port your server listens on inside the container</button>
+  <button class="opt" data-why="No. The node is not involved. A ClusterIP Service opens no node port.">The port opened on the kind node for traffic</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>You run <code>kubectl expose deployment hello --port=80</code>, forgetting <code>--target-port</code>. Then you port-forward and <code>curl</code>. What happens?</legend>
+  <button class="opt" data-why="No. Kubernetes cannot know your server's port. It does not inspect the container.">It works, because Kubernetes detects that your server uses port 8080</button>
+  <button class="opt" data-why="Right. targetPort defaults to the same value as port, 80. Nothing listens there, so curl gets an empty reply and port-forward logs connection refused.">It fails, because the target port defaults to 80 as well</button>
+  <button class="opt" data-why="No. expose accepts it happily. The mistake only shows when traffic arrives.">expose refuses to run until you give it a target port</button>
+  <button class="opt" data-why="No. A Service never changes your container's settings.">It works, because the Service sets PORT to 80 for you</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kubernetes.io/docs/tutorials/kubernetes-basics/">Kubernetes: Learn Kubernetes Basics</a>, modules 2 to 5 (deploy, explore, expose, scale). Skip module 1, which sets up minikube; you have kind. About 20 minutes, and it repeats today's three objects from a second angle.
+</div>
+
+<p class="ask">Something not answering, or a status you cannot explain? Ask your instructor, or ask in the course channel with the output of <code>kubectl describe</code>.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/concepts/workloads/pods/">Kubernetes: Pods</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Kubernetes: Deployments</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/">Kubernetes: ReplicaSet</a> ·
+[4] <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Kubernetes: Service</a> ·
+[5] <a href="https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/">Kubernetes: Use port forwarding to access applications</a> ·
+[6] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>.
+Commands verified 2026-10-06 on kind v0.33.0 (node image kindest/node:v1.37.0), kubectl 1.37.1 and Docker 28.3 (macOS).</p>
+
+<nav class="pager"><a href="s1-06-looking-with-kubectl.html">← previous: looking with kubectl</a><a href="s1-08-write-the-yaml.html">next: write the YAML →</a></nav>
+
+</main>
+</body>
+</html>
