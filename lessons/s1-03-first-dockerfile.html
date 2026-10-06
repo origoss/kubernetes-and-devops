@@ -91,7 +91,7 @@ root
 # ls
 Dockerfile.single  go.mod  main.go
 # exit</pre>
-  <p>Two surprises. The container runs as <code>root</code>. And <code>COPY . .</code> copied <em>everything</em> in your folder, the Dockerfile too.</p>
+  <p>Two surprises. The container runs as <code>root</code>. And <code>COPY . .</code> copied <em>everything</em> in your folder, the Dockerfile too, and your hidden <code>.git</code> folder (<code>ls -a</code> shows it).</p>
 </li>
 
 <li>
@@ -164,7 +164,7 @@ hello        single    bf5871c35369   3 seconds ago   1.43GB</pre>
 <p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
 
 <fieldset class="quiz-q" data-answer="2">
-  <legend><span class="kind">Predict the output</span>You edit only <code>README.md</code> and rebuild <code>Dockerfile.single</code>. Which steps run again?</legend>
+  <legend><span class="kind">Predict the output</span>You add a <code>README.md</code>, change nothing else, and rebuild <code>Dockerfile.single</code>. Which steps run again?</legend>
   <button class="opt" data-why="No. COPY . . copies the whole folder, README.md included, so its input did change.">None, because main.go itself did not change at all</button>
   <button class="opt" data-why="No. Only the steps from the first changed one onwards rerun; FROM and WORKDIR stay cached.">All of them, starting again from the FROM line</button>
   <button class="opt" data-why="Right. The build context changed, so COPY . . reruns, and every step after it too. Lesson 04 fixes this by copying only what the build needs.">COPY . . and the go build after it</button>
