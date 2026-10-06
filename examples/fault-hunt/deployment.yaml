@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+        - name: hello
+          image: hello:0.1.10
+          env:
+            - name: PORT
+              value: "abc"
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "64"
+            limits:
+              memory: 2Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8008
+            periodSeconds: 10

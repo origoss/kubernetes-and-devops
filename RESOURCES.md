@@ -90,6 +90,10 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
   Primary concept pages. Use for: citing each object; ReplicaSet explains self-healing.
 - [Docs: Debug Pods (Kubernetes)](https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/)
   Diagnosing Pending, CrashLoopBackOff and ImagePullBackOff with get/describe/logs/events. **Recommended read** for the "looking with kubectl" lesson and the fault hunt.
+- [Docs: Debug Services](https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/) and [Determine the reason for Pod failure](https://kubernetes.io/docs/tasks/debug/debug-application/determine-reason-pod-failure/) (Kubernetes)
+  Selector and port mismatches step by step; termination messages and Last State. Use for: homework 2 (fault hunt).
+- [Docs: kubectl diff (Kubernetes)](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_diff/)
+  Use for: checking that files match the cluster (lesson 07, homework 2 self-check).
 - [Docs: kubectl Quick Reference (Kubernetes)](https://kubernetes.io/docs/reference/kubectl/quick-reference/)
   Use for: the kubectl reference sheet. Per-command pages: [get](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/), [describe](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_describe/), [logs](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/), [events](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_events/), [scale](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_scale/), [port-forward](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_port-forward/).
 - [Docs: Use port forwarding to access applications (Kubernetes)](https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/)

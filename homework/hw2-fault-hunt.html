@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fault Hunt</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Homework 2 · between session 1 and session 2 · about 60–90 minutes</p>
+<h1>Fault hunt: bring a broken deployment back</h1>
+
+<div class="win">
+  <strong>Your win:</strong> you take over a Deployment and a Service that do not work, find eight faults by reading what Kubernetes tells you, fix each one in a file, and can prove every diagnosis with one line of real output.
+</div>
+
+<p class="meta">Before this: lessons <a href="../lessons/s1-05-why-orchestration.html">05</a> to <a href="../lessons/s1-08-health-and-resources.html">08</a>, and the image <code>hello:0.1.1</code> you built in <a href="../lessons/s1-07-pod-deployment-service.html">lesson 07</a>. This homework teaches nothing new. Every fault is something a lesson showed you, now without the lesson telling you where it is.</p>
+
+<h2>The story</h2>
+<p>Monday morning, you are on call. On Friday afternoon a colleague shipped <code>hello</code> to a fresh cluster, wrote "deployed, all good" in the team chat, and left for a week of hiking with no signal. Since then nobody has managed to reach the service. Their two manifests are all you have. Make it work, and leave a report so the colleague learns what went wrong.</p>
+
+<h2>How to submit</h2>
+<ol>
+  <li>In your <code>hello</code> repository, create a branch: <code>git switch -c hw2-fault-hunt</code>.</li>
+  <li>Set up the cluster (below), hunt, commit <code>fault-hunt/</code>, push the branch, and open a <strong>pull request</strong> into <code>main</code>.</li>
+  <li>Paste the full output of the self-check script into the pull request description, and request your instructor as reviewer.</li>
+  <li>Deadline: <strong>before session 2</strong>, the same as homework 1.</li>
+</ol>
+
+<h2>The rules</h2>
+<ul>
+  <li>There are exactly <strong>eight faults</strong>: six in <code>deployment.yaml</code>, two in <code>service.yaml</code>. One fault can hide the next, so fixing one may reveal another.</li>
+  <li><strong>Fix the files</strong>, then <code>kubectl apply -f fault-hunt/</code>. You may try a change live with <code>kubectl edit</code>, but the self-check fails until the files match the cluster.</li>
+  <li><strong>Repair, never remove.</strong> The Deployment keeps 2 replicas, a memory limit and all three probes. Deleting a probe hides a fault; it does not fix it, and the self-check catches it.</li>
+  <li><strong>Look before you change.</strong> For every fault, find the line of output that names the cause before you touch a file. That line goes into your report.</li>
+  <li>No hints. Everything you need is in what <code>kubectl</code> prints.</li>
+</ul>
+
+<h2>Set up</h2>
+<p>The setup script creates a separate one-node kind cluster called <code>fault-hunt</code>, so your lesson cluster stays untouched. It copies your <code>hello:0.1.1</code> image into the cluster, copies the broken manifests and a report template into <code>fault-hunt/</code> in your repository, and applies them. Get the latest course material first:</p>
+<pre class="cmd">git -C ../kubernetes-and-devops pull</pre>
+<p>Then, from the root of your <code>hello</code> repository:</p>
+<pre class="cmd">bash ../kubernetes-and-devops/scripts/fault-hunt-up.sh</pre>
+<p class="note">The commands assume your <code>hello</code> and <code>kubernetes-and-devops</code> folders sit side by side. If not, adjust the <code>../kubernetes-and-devops</code> path. No <code>hello:0.1.1</code> left? Rebuild it from that commit, or pass another image that has no backing service: <code>… fault-hunt-up.sh hello:0.1.0</code>.</p>
+<details class="expect"><summary>Expected output (the end)</summary>
+<pre>Copied the manifests and REPORT.md into fault-hunt/.
+deployment.apps/hello created
+service/hello created
+
+Your kubectl now points at kind-fault-hunt. The hunt is on: kubectl get pods
+Back to your lesson cluster later: kubectl config use-context kind-kind</pre>
+</details>
+<p>The script is safe to run again, for example after a reboot: it reuses the cluster, keeps your edited files and applies them.</p>
+
+<h2>The method</h2>
+<p>Every fault in this homework follows the same loop. Do not skip steps, and do not guess:</p>
+<ol>
+  <li><strong>Look:</strong> <code>kubectl get pods</code>, <code>kubectl get deploy,rs,svc,endpointslices</code>. Which object is not in the state you expect?</li>
+  <li><strong>Ask that object:</strong> <code>kubectl describe</code> it, and read <em>State</em>, <em>Last State</em>, <em>Conditions</em> and the <em>Events</em> at the bottom.</li>
+  <li><strong>Ask the process:</strong> if a container started, <code>kubectl logs</code> it; if it already died, <code>kubectl logs --previous</code>.</li>
+  <li><strong>Compare:</strong> what the YAML asks for against what exists. <code>kubectl get … -o yaml</code> shows the full truth.</li>
+  <li><strong>Change one thing</strong> in the file, <code>kubectl apply -f fault-hunt/</code>, and go back to step 1.</li>
+</ol>
+<p>The commands you need all come from lessons 05–08:</p>
+<table>
+  <thead><tr><th>Question</th><th>Command</th></tr></thead>
+  <tbody>
+    <tr><td>What runs, and in what state?</td><td><code>kubectl get pods</code>, <code>kubectl get pods -w</code></td></tr>
+    <tr><td>Why is it in that state?</td><td><code>kubectl describe pod &lt;name&gt;</code>, <code>kubectl get events --sort-by=.lastTimestamp</code></td></tr>
+    <tr><td>What did the program say?</td><td><code>kubectl logs &lt;pod&gt;</code>, <code>kubectl logs &lt;pod&gt; --previous</code></td></tr>
+    <tr><td>Is the rollout stuck?</td><td><code>kubectl rollout status deploy/hello</code>, <code>kubectl get rs</code></td></tr>
+    <tr><td>Where does the Service send traffic?</td><td><code>kubectl get svc -o wide</code>, <code>kubectl get endpointslices</code></td></tr>
+    <tr><td>Which images does the node have?</td><td><code>docker exec fault-hunt-control-plane crictl images</code></td></tr>
+    <tr><td>Does it answer?</td><td><code>kubectl port-forward svc/hello 8080:80</code>, then <code>curl localhost:8080/</code></td></tr>
+    <tr><td>Do my files match the cluster?</td><td><code>kubectl diff -f fault-hunt/</code></td></tr>
+  </tbody>
+</table>
+<p class="note">After each fix, old broken Pods may linger next to the new ones. That is the rollout at work (lesson 07): with 2 replicas it adds one new Pod at a time and removes an old one only when a new one is ready. Always read the <em>newest</em> Pod: <code>kubectl get pods --sort-by=.metadata.creationTimestamp</code>.</p>
+
+<h2>The report</h2>
+<p>The setup script created <code>fault-hunt/REPORT.md</code> with eight empty sections. Fill in one per fault, in the order you found them:</p>
+<table>
+  <thead><tr><th>Field</th><th>What goes in it</th></tr></thead>
+  <tbody>
+    <tr><td>Symptom</td><td>What you saw first, e.g. the <code>STATUS</code> column.</td></tr>
+    <tr><td>Command</td><td>The command whose output showed you the cause.</td></tr>
+    <tr><td>Evidence</td><td>The exact line of that output, copied, not retyped.</td></tr>
+    <tr><td>Cause</td><td>One sentence: what was wrong, and why it produced that symptom.</td></tr>
+    <tr><td>Fix</td><td>The file and field you changed, and the value you chose.</td></tr>
+  </tbody>
+</table>
+<p>The report is what gets graded. The fixed YAML alone proves little, because anyone could compare it with the lessons. The evidence line proves that you found the fault by looking.</p>
+
+<h2>Check your work</h2>
+<p>From the root of your <code>hello</code> repository:</p>
+<pre class="cmd">bash ../kubernetes-and-devops/scripts/check-fault-hunt.sh</pre>
+<p>It checks only outcomes: Pods scheduled and running, no restarts for 40 seconds, ready endpoints behind the Service, an HTTP 200 through it, and files that match the cluster. It never names a cause, so a red line tells you where to look, not what to change. It takes about a minute, and it changes nothing.</p>
+<details class="expect"><summary>Expected output when you are done</summary>
+<pre>Homework 2 self-check · context kind-fault-hunt
+
+✔ Deployment asks for 2 replicas
+✔ startup, readiness and liveness probes and a memory limit are still there
+✔ no Pod is Pending
+✔ rollout complete: 2/2 replicas up to date and available
+  … watching restarts for 40 seconds
+✔ no container restarted in 40 seconds
+✔ Service hello has 2 ready endpoints
+✔ GET / through the Service answers 200
+✔ fault-hunt/ matches the cluster (kubectl diff is empty)
+
+8 passed, 0 failed
+✔ ALL CHECKS PASSED. Paste this output into your pull request.</pre>
+</details>
+<p class="note">Run it right after setup too. It passes a few checks at once, because a broken system can look partly fine; the failing ones are your starting point.</p>
+
+<h2>Clean up</h2>
+<p>When the pull request is open, delete the cluster and point <code>kubectl</code> back at your lesson cluster:</p>
+<pre class="cmd">kind delete cluster --name fault-hunt</pre>
+<pre class="cmd">kubectl config use-context kind-kind</pre>
+<p>Your fixed files stay in your repository. To hunt again later, run the setup script: it recreates the cluster from them.</p>
+
+<h2>Questions your reviewer will ask</h2>
+<ol>
+  <li>Two of the faults crash-loop. How did you tell them apart, and which command did that?</li>
+  <li>While a Pod was <code>Pending</code>, why was there no image pull error, even though the tag was also wrong?</li>
+  <li>The Service's own fields looked fine to <code>kubectl get svc</code>. What showed you that it sent traffic nowhere, and later to the wrong place?</li>
+  <li>While you fixed the Deployment, old broken Pods stayed around. Why did Kubernetes not remove them at once?</li>
+  <li>Which memory limit did you pick, and how would you choose one for a real service?</li>
+  <li>Your colleague wrote "all good". Which one command could they have run on Friday to see it was not?</li>
+</ol>
+
+<p class="ask">Stuck? Run the method again from step 1 on the newest Pod, and read every line of <code>describe</code>. Still stuck? Ask your instructor, with the self-check output and the <code>describe</code> output.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/">Kubernetes: Debug Pods</a> ·
+[2] <a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/">Kubernetes: Debug Services</a> ·
+[3] <a href="https://kubernetes.io/docs/tasks/debug/debug-application/determine-reason-pod-failure/">Kubernetes: Determine the reason for Pod failure</a> ·
+[4] <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">Kubernetes: Resource management for Pods and containers</a> ·
+[5] <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">Kubernetes: Liveness, readiness and startup probes</a> ·
+[6] <a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_diff/">kubectl diff</a>.
+Setup, all eight faults and the self-check verified 2026-10-06 on kind v0.33.0 / Kubernetes v1.37.0, fixing the faults one by one (self-check: 7 passed, 1 failed before the last fix; 8 passed after).</p>
+
+</main>
+</body>
+</html>

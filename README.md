@@ -23,6 +23,10 @@ Open the lessons in a browser. Each one is a short, self-contained HTML page wit
 
 [Make your server twelve-factor](homework/hw1-twelve-factor.html): a Redis-backed visit counter, 2 replicas, graceful shutdown, JSON logs, startup/readiness/liveness probes. Check your work with [scripts/check-12factor.sh](scripts/check-12factor.sh). About 6–8 hours, submitted as a pull request.
 
+### Homework 2 (between session 1 and session 2)
+
+[Fault hunt: bring a broken deployment back](homework/hw2-fault-hunt.html): eight planted faults in a Deployment and a Service on a local one-node kind cluster, found with `get`, `describe`, events and logs, fixed in files, and written up as a report. Set up with [scripts/fault-hunt-up.sh](scripts/fault-hunt-up.sh), check with [scripts/check-fault-hunt.sh](scripts/check-fault-hunt.sh). About 60–90 minutes, submitted as a pull request.
+
 ## Session 2: CI/CD
 
 | # | Lesson | Time | When |
