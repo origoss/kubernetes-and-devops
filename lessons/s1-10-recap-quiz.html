@@ -123,7 +123,7 @@
 <fieldset class="quiz-q" data-answer="1">
   <legend><span class="kind"><a href="s1-05-why-orchestration.html">Lesson 05</a> · Concept</span>Inside the <code>kind-control-plane</code> node, what runs your Pods' containers?</legend>
   <button class="opt" data-why="No. kubectl only talks to the API server.">kubectl itself, which starts processes on each node</button>
-  <button class="opt" data-why="Right. crictl ps lists them, and docker is not even installed in the node. Your Docker-built OCI images run unchanged.">containerd, the runtime; there is no Docker</button>
+  <button class="opt" data-why="Right. crictl ps lists them, and docker is not even installed in the node. Your Docker-built OCI images run unchanged.">containerd, the container runtime; there is no Docker</button>
   <button class="opt" data-why="No. The node is a Docker container on your laptop, but the Pods inside it run on containerd.">your laptop's Docker daemon, shared into every node</button>
   <button class="opt" data-why="No. Containers are processes, not VMs. That was lesson 01.">a small virtual machine started for every pod</button>
   <div class="why" aria-live="polite"></div>
