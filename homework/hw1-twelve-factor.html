@@ -171,10 +171,11 @@ Normal   Killing    Pod/start-demo  Container hello failed startup probe, will b
 <pre class="cmd">kind load docker-image hello:0.2.0</pre>
 
 <h2>Self-check</h2>
-<p>Download the check script from the course repository, deploy your work, and run it against your image:</p>
-<pre class="cmd">curl -fsSLO https://raw.githubusercontent.com/origoss/kubernetes-and-devops/main/scripts/check-12factor.sh &amp;&amp; chmod +x check-12factor.sh</pre>
+<p>Deploy your work from your <code>hello</code> folder:</p>
 <pre class="cmd">kubectl apply -f k8s/</pre>
-<pre class="cmd">./check-12factor.sh hello:0.2.0</pre>
+<p>The check script is in the course repository you cloned in the <a href="../lessons/s1-00-preflight.html">pre-flight check</a>. Go to that folder, update it, and run the script against your image:</p>
+<pre class="cmd">git pull</pre>
+<pre class="cmd">bash scripts/check-12factor.sh hello:0.2.0</pre>
 <p>Part 1 runs your image in Docker, with Redis deliberately unreachable. Part 2 checks your deployment in kind. It takes about a minute. A passing run looks like this:</p>
 <details class="expect"><summary>Expected output</summary>
 <pre>Homework 1 self-check · image hello:0.2.0
