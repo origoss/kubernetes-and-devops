@@ -10,7 +10,7 @@
 <body>
 <main>
 
-<p class="crumbs">Session 1 · Kubernetes · about 15 minutes · read before the session</p>
+<p class="crumbs">Session 1 · Kubernetes · about 20 minutes · read before the session</p>
 <h1>Why orchestration?</h1>
 
 <div class="win">
@@ -161,7 +161,6 @@ kubectl cluster-info --context kind-kind
 
 Have a question, bug, or feature request? Let us know! https://kind.sigs.k8s.io/#community 🙂</pre>
   </details>
-  <p class="note">kind also pointed <code>kubectl</code> at the new cluster: the <em>context</em> <code>kind-kind</code> in <code>~/.kube/config</code>.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup></p>
 </li>
 
 <li>
@@ -178,6 +177,45 @@ NAME                 STATUS   ROLES           AGE   VERSION
 kind-control-plane   Ready    control-plane   29s   v1.37.0</pre>
   </details>
   <p>One node. If it says <code>NotReady</code>, wait 20 seconds and ask again: the node network is still starting.</p>
+</li>
+
+<li>
+  <p>How did <code>kubectl</code> know where your cluster is? From its <strong>kubeconfig</strong> file, <code>~/.kube/config</code>. kind wrote into it when it created the cluster.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup> The file holds three lists:<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/">[7]</a></sup></p>
+  <ul>
+    <li><strong>clusters</strong>: where an API server is, with its address and certificate;</li>
+    <li><strong>users</strong>: how you prove who you are, here with a client certificate;</li>
+    <li><strong>contexts</strong>: a named pair of one cluster and one user.</li>
+  </ul>
+  <p>The <strong>current context</strong> decides which cluster every <code>kubectl</code> command goes to. kind named its context <code>kind-kind</code>.</p>
+<pre class="cmd">kubectl config get-contexts</pre>
+<pre class="cmd">kubectl config view --minify</pre>
+  <details class="expect"><summary>Expected output (your port differs)</summary>
+<pre>CURRENT   NAME        CLUSTER     AUTHINFO    NAMESPACE
+*         kind-kind   kind-kind   kind-kind
+
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://127.0.0.1:62635
+  name: kind-kind
+contexts:
+- context:
+    cluster: kind-kind
+    user: kind-kind
+  name: kind-kind
+current-context: kind-kind
+kind: Config
+users:
+- name: kind-kind
+  user:
+    client-certificate-data: DATA+OMITTED
+    client-key-data: DATA+OMITTED</pre>
+  </details>
+  <p>The <code>*</code> marks the current context. <code>--minify</code> shows only the parts the current context uses, and hides the keys as <code>DATA+OMITTED</code>. The <code>server</code> line is the port Docker forwards, the same address <code>kubectl cluster-info</code> printed.</p>
+  <p class="warn">The real file contains the admin key to your cluster. Never commit it to Git or paste it anywhere.</p>
+  <p class="note">More than one context listed, for example <code>docker-desktop</code> from an earlier install? Switch with <code>kubectl config use-context kind-kind</code>. To point <code>kubectl</code> at a different file instead of <code>~/.kube/config</code>, set the <code>KUBECONFIG</code> environment variable.</p>
+  <p class="note">Seeing <code>The connection to the server localhost:8080 was refused</code>? <code>kubectl</code> found no current context and fell back to <code>localhost:8080</code>, where nothing listens. While the cluster runs, <code>kind export kubeconfig</code> writes the context back.</p>
 </li>
 
 <li>
@@ -210,7 +248,7 @@ eab45a23ad04f   b1ad0e33c9012   ...   Running   kube-controller-manager   ...   
 
 <li>
   <p><strong>Leave the cluster running.</strong> Lesson 06 starts from it.</p>
-  <p class="note">After a laptop reboot: kind gives its node container a restart policy, so when Docker starts again the node usually comes back with your cluster in it. Check with <code>docker inspect kind-control-plane --format '{{.HostConfig.RestartPolicy.Name}}'</code>, which prints <code>on-failure</code>. If <code>kubectl get nodes</code> errors after a reboot, start over; it takes a minute. When you are finished with it for good, <code>kind delete cluster</code> removes it.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup></p>
+  <p class="note">After a laptop reboot: kind gives its node container a restart policy, so when Docker starts again the node usually comes back with your cluster in it. Check with <code>docker inspect kind-control-plane --format '{{.HostConfig.RestartPolicy.Name}}'</code>, which prints <code>on-failure</code>. If <code>kubectl get nodes</code> errors after a reboot, start over; it takes a minute. When you are finished with it for good, <code>kind delete cluster</code> removes it, and its context from your kubeconfig.<sup class="cite"><a href="https://kind.sigs.k8s.io/docs/user/quick-start/">[6]</a></sup></p>
 </li>
 </ol>
 
@@ -250,6 +288,15 @@ eab45a23ad04f   b1ad0e33c9012   ...   Running   kube-controller-manager   ...   
   <button class="opt" data-why="No. The node is the kind-control-plane container, not your laptop.">Your laptop itself, listed as a single node named localhost</button>
   <button class="opt" data-why="No. Nodes are machines (here, containers). They exist before any app is deployed.">An error, since nodes only appear after you deploy something</button>
   <button class="opt" data-why="Right. One node. For the first ten to twenty seconds it can say NotReady while the node network starts.">One node, kind-control-plane, possibly NotReady for a few more seconds</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span><code>kubectl get nodes</code> says <code>The connection to the server localhost:8080 was refused</code>. What is the likely cause?</legend>
+  <button class="opt" data-why="No. A NotReady node still answers kubectl get nodes; it is just listed as NotReady.">The kind node is still NotReady, so it refuses</button>
+  <button class="opt" data-why="No. kubectl never talks to your app. It talks to the API server named in its kubeconfig.">Your server from lesson 02 is blocking port 8080</button>
+  <button class="opt" data-why="Right. With no context, kubectl tries localhost:8080. Check kubectl config get-contexts, or run kind export kubeconfig.">No current context, so kubectl fell back to localhost</button>
+  <button class="opt" data-why="No. kubectl talks to your cluster's API server, not to Docker Hub.">Docker Hub rate limits are blocking the kubectl requests</button>
   <div class="why" aria-live="polite"></div>
 </fieldset>
 
@@ -296,7 +343,8 @@ eab45a23ad04f   b1ad0e33c9012   ...   Running   kube-controller-manager   ...   
 [3] <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes: Controllers</a> ·
 [4] <a href="https://kubernetes.io/docs/concepts/architecture/">Kubernetes: Cluster Architecture</a> ·
 [5] <a href="https://kubernetes.io/docs/concepts/overview/components/">Kubernetes: Components</a> ·
-[6] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a>.
+[6] <a href="https://kind.sigs.k8s.io/docs/user/quick-start/">kind: Quick Start</a> ·
+[7] <a href="https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/">Kubernetes: Organizing cluster access using kubeconfig files</a>.
 Commands verified 2026-10-06 on Docker 28.3, kind v0.33.0 (node image kindest/node:v1.37.0) and kubectl v1.37.1 (macOS).</p>
 
 <nav class="pager"><a href="s1-04-advanced-dockerfile.html">← previous: advanced Dockerfile</a><a href="s1-06-looking-with-kubectl.html">next: looking with kubectl →</a></nav>

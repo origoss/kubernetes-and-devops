@@ -112,6 +112,7 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
 - [Docs: Controllers (Kubernetes)](https://kubernetes.io/docs/concepts/architecture/controller/). Use for: desired state and reconciliation.
 - [Docs: Cluster Architecture (Kubernetes)](https://kubernetes.io/docs/concepts/architecture/). Use for: control plane vs worker nodes.
 - [Docs: Kubernetes Components (Kubernetes)](https://kubernetes.io/docs/concepts/overview/components/). Use for: what each component does.
+- [Docs: Organizing cluster access using kubeconfig files (Kubernetes)](https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/). Use for: clusters, users, contexts, KUBECONFIG.
 - [Article: The Twelve-Factor App, Config](https://12factor.net/config). Use for: why the port comes from an environment variable.
 - [Site: Retrieval Practice (Agarwal & Bain)](https://www.retrievalpractice.org/). Use for: why the recap quiz is spaced.
 

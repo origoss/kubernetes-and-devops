@@ -13,7 +13,7 @@ Open the lessons in a browser. Each one is a short, self-contained HTML page wit
 | 02 | [Your web server](lessons/s1-02-web-server.html) | 15' | before |
 | 03 | [First Dockerfile](lessons/s1-03-first-dockerfile.html) | 15' | after |
 | 04 | [Advanced Dockerfile: multi-stage, EXPOSE, VOLUME, USER](lessons/s1-04-advanced-dockerfile.html) | 20' | after |
-| 05 | [Why orchestration + kind](lessons/s1-05-why-orchestration.html) | 15' | before |
+| 05 | [Why orchestration + kind](lessons/s1-05-why-orchestration.html) | 20' | before |
 | 06 | [Looking with kubectl](lessons/s1-06-looking-with-kubectl.html) | 15' | after |
 | 07 | [Pod → Deployment → Service](lessons/s1-07-pod-deployment-service.html) | 15' | after |
 | 08 | [Write the YAML, update and roll back](lessons/s1-08-write-the-yaml.html) | 20' | after |
