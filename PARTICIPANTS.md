@@ -6,7 +6,6 @@
 | Marci0224 | https://github.com/Marci0224/hello |
 | MarkusIfquil | https://github.com/MarkusIfquil/Kubernetes-course |
 | RobertNagy299 | https://github.com/RobertNagy299/kubernetes-course-origoss-personal |
-| Szebicc | https://github.com/Szebicc/Origoss-hw |
 
 ## Add yourself
 
