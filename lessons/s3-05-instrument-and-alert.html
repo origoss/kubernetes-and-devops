@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instrument and Alert</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Observability · about 35 minutes · after the session</p>
+<h1>Instrument your server, query it, graph it, alert on it</h1>
+
+<div class="win">
+  <strong>Your win:</strong> your own code produces metrics. Prometheus finds them because of a ServiceMonitor you wrote. A Grafana dashboard shows Rate, Errors and Duration, and an alert you wrote fires.
+</div>
+
+<p class="meta">Before this: <a href="s3-04-config-file-vs-operator.html">lesson 04</a>, so kube-prometheus-stack runs in the <code>monitoring</code> namespace and you know why a ServiceMonitor needs the label <code>release: kps</code>. Your <code>hello</code> repository has <code>main.go</code>, a multi-stage <code>Dockerfile</code> (<a href="s1-04-advanced-dockerfile.html">session 1, lesson 04</a>) and <code>k8s/</code> (<a href="s1-08-health-and-resources.html">session 1, lesson 08</a>). Work in your <code>hello</code> repository. The finished files are in the course repository under <code>examples/s3/hello-0.2.0/</code> and <code>examples/s3/k8s/</code>.</p>
+
+<h2>The chain you are building</h2>
+
+<p>Five links, each one yours by the end of this lesson:</p>
+
+<ol>
+  <li>Your Go code counts and times every request, and serves the numbers at <code>/metrics</code>.</li>
+  <li>A <strong>ServiceMonitor</strong> tells the operator: scrape the Service <code>hello</code>, on the port named <code>http</code>.</li>
+  <li>Prometheus scrapes every Pod every 15 seconds and stores the numbers as time series.</li>
+  <li>Grafana asks Prometheus questions in <strong>PromQL</strong> and draws the answers.</li>
+  <li>A <strong>PrometheusRule</strong> asks one question over and over. When the answer is "bad" for long enough, Alertmanager gets an alert.</li>
+</ol>
+
+<h2>Two metric types are enough</h2>
+
+<p>Prometheus clients offer a few metric types. You need two:<sup class="cite"><a href="https://prometheus.io/docs/concepts/metric_types/">[1]</a></sup></p>
+
+<ul>
+  <li>A <strong>counter</strong> only goes up. It resets to zero only when the process restarts. Use it for things that happen: requests served, errors returned.</li>
+  <li>A <strong>histogram</strong> sorts each observation into buckets, such as "under 5&nbsp;ms", "under 10&nbsp;ms", and so on. Each bucket is itself a counter. It also keeps a count and a sum of all observations. Use it for sizes and durations, so you can later ask "how slow were the slowest 5&nbsp;%?"</li>
+</ul>
+
+<p>Names follow conventions.<sup class="cite"><a href="https://prometheus.io/docs/practices/naming/">[2]</a></sup> A counter ends in <code>_total</code>. A name carries its unit, and the unit is a base unit: seconds, not milliseconds; bytes, not megabytes. So you will create <code>http_requests_total</code> and <code>http_request_duration_seconds</code>.</p>
+
+<h2>Labels, and the cardinality trap</h2>
+
+<p>A label splits one metric into several time series, such as <code>http_requests_total{path="GET /", status="200"}</code>. Every distinct combination of label values is a separate series, and each series costs Prometheus memory, CPU and disk.<sup class="cite"><a href="https://prometheus.io/docs/practices/naming/">[2]</a></sup> The docs advise keeping most metrics below about ten series.<sup class="cite"><a href="https://prometheus.io/docs/practices/instrumentation/">[3]</a></sup></p>
+
+<p>So never put an unbounded value in a label: not the raw URL, not a user ID, not a request ID. Picture labelling by raw URL. Anyone who sends <code>/a1</code>, <code>/a2</code>, <code>/a3</code>… creates a new series with each request, until Prometheus runs out of memory.</p>
+
+<p>Your server already has a bounded value at hand. Since Go 1.22, <code>http.ServeMux</code> matches patterns such as <code>GET /healthz</code>, and it records the pattern that matched in <code>r.Pattern</code>.<sup class="cite"><a href="https://pkg.go.dev/net/http#Request">[4]</a></sup> You wrote three patterns, so the label can have only a handful of values, whatever URLs the world sends.</p>
+
+<h2>RED: three questions for every service</h2>
+
+<p>For a service that answers requests, watch three things. The <strong>RED method</strong> names them:<sup class="cite"><a href="https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/">[5]</a></sup></p>
+
+<table>
+  <thead><tr><th>Letter</th><th>The question</th><th>Your metric</th></tr></thead>
+  <tbody>
+    <tr><td><strong>R</strong>ate</td><td>How many requests per second?</td><td><code>http_requests_total</code></td></tr>
+    <tr><td><strong>E</strong>rrors</td><td>How many of those fail?</td><td><code>http_requests_total</code>, <code>status</code> 5xx</td></tr>
+    <tr><td><strong>D</strong>uration</td><td>How long do they take?</td><td><code>http_request_duration_seconds</code></td></tr>
+  </tbody>
+</table>
+
+<p>The Prometheus docs make the same point: for an online-serving system, the key metrics are requests, errors and latency.<sup class="cite"><a href="https://prometheus.io/docs/practices/instrumentation/">[3]</a></sup></p>
+
+<h2>Two PromQL functions</h2>
+
+<p>A counter's raw value is "requests since this process started". That number only grows, and it drops to zero on every restart, so a graph of it says little. <code>rate(counter[1m])</code> gives the per-second average increase over the last minute. It also adjusts for counter resets, so a restart does not show up as a dip.<sup class="cite"><a href="https://prometheus.io/docs/prometheus/latest/querying/functions/">[6]</a></sup></p>
+
+<p>A window must hold at least two scrapes. At one scrape every 15 seconds, <code>[1m]</code> holds four. This lab is short, so it uses <code>[1m]</code>. In production, <code>[5m]</code> is the usual choice: smoother, and less sensitive to one missed scrape.</p>
+
+<p><code>histogram_quantile(0.95, …)</code> estimates the 95th percentile from the buckets: 95&nbsp;% of requests were faster than this. It cannot know the exact durations, only the bucket counts. So it assumes the observations are spread evenly inside a bucket, and interpolates. The answer is only as precise as your buckets.<sup class="cite"><a href="https://prometheus.io/docs/practices/histograms/">[7]</a></sup></p>
+
+<h2>An alert waits before it fires</h2>
+
+<p>An alerting rule is a PromQL expression that Prometheus evaluates again and again. If it returns a result, the alert is <strong>active</strong>. With <code>for: 2m</code> it first goes <strong>pending</strong>, and it turns <strong>firing</strong> only when the condition has held for two whole minutes.<sup class="cite"><a href="https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/">[8]</a></sup> One bad scrape, or a short burst of errors, never wakes anyone up. Only firing alerts go to Alertmanager, which groups them and sends notifications.</p>
+
+<p>Prometheus picks up a PrometheusRule the same way it picks up a ServiceMonitor: by label. The stack's Prometheus has <code>ruleSelector: {matchLabels: {release: kps}}</code>, the twin of the <code>serviceMonitorSelector</code> from lesson 04.<sup class="cite"><a href="https://prometheus-operator.dev/docs/developer/alerting/">[9]</a></sup> Forget the label and your rule is silently ignored.</p>
+
+<h2>Do it</h2>
+
+<p>You will need several terminals: each <code>port-forward</code> keeps its terminal busy until you press Ctrl+C.</p>
+
+<ol class="steps">
+<li>
+  <p>Add the Prometheus client library to your module. <code>go get</code> adds it to <code>go.mod</code>; <code>go mod tidy</code> adds what that library needs in turn and writes the checksums to <code>go.sum</code>.<sup class="cite"><a href="https://go.dev/doc/modules/managing-dependencies">[10]</a></sup></p>
+<pre class="cmd">go get github.com/prometheus/client_golang@latest</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>go: added github.com/prometheus/client_golang v1.25.0</pre>
+  </details>
+  <p>Do not run <code>go mod tidy</code> yet. Your code does not import the library, so tidy would remove it again. First the code.</p>
+</li>
+
+<li>
+  <p>Replace <code>main.go</code>. Read it all before you save it.</p>
+  <p class="filename">main.go</p>
+<pre class="file">package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var (
+	requests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "HTTP requests, by route and status code.",
+	}, []string{"path", "status"})
+	duration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "HTTP request latency, by route.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"path"})
+)
+
+// statusRecorder remembers the status code the handler wrote.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// instrument counts and times every request. It labels by the route
+// pattern ("GET /"), never by the raw URL, so the label set stays small.
+func instrument(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &amp;statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		requests.WithLabelValues(r.Pattern, strconv.Itoa(rec.status)).Inc()
+		duration.WithLabelValues(r.Pattern).Observe(time.Since(start).Seconds())
+	})
+}
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "hello from my container")
+	})
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "ok")
+	})
+	mux.HandleFunc("GET /boom", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	mux.Handle("GET /metrics", promhttp.Handler())
+	log.Printf("listening on :%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, instrument(mux)))
+}</pre>
+  <p>What each part does:</p>
+  <ul>
+    <li><strong><code>promauto</code></strong> creates the two metrics and registers them with the library's default registry, so you never call a register function yourself.<sup class="cite"><a href="https://pkg.go.dev/github.com/prometheus/client_golang/prometheus/promauto">[11]</a></sup> <code>NewCounterVec</code> is a counter with labels <code>path</code> and <code>status</code>. <code>NewHistogramVec</code> is a histogram with label <code>path</code>. <code>DefBuckets</code> are the library's default buckets, from 5&nbsp;ms up to 10&nbsp;s.</li>
+    <li><strong><code>statusRecorder</code></strong> wraps the <code>ResponseWriter</code> and notes the status code a handler writes. It starts at 200, because a handler that only writes a body never calls <code>WriteHeader</code>, and Go then sends 200.</li>
+    <li><strong><code>instrument</code></strong> is middleware: a handler that wraps another handler. It starts a clock, lets the real handler run, then adds one to the counter and records the duration. The mux fills in <code>r.Pattern</code> while it routes the request, so once <code>next.ServeHTTP</code> returns, the pattern is there to read.</li>
+    <li><strong><code>/boom</code></strong> always answers 500. It is a fault injector: a way to make errors on demand, so you can watch your graphs and your alert react.</li>
+    <li><strong><code>/metrics</code></strong> is served by <code>promhttp.Handler()</code>, which prints every registered metric as text. It passes through the middleware too, so the scrapes themselves are counted.</li>
+    <li>The handlers now live on a <code>mux</code> of your own instead of the default one, so that the whole mux can be wrapped: <code>instrument(mux)</code>.</li>
+  </ul>
+  <p>Now tidy, and check that it builds:</p>
+<pre class="cmd">go mod tidy</pre>
+<pre class="cmd">go build ./...</pre>
+  <p><code>go.mod</code> now lists <code>client_golang v1.25.0</code> and a few indirect dependencies, and there is a new <code>go.sum</code>.</p>
+</li>
+
+<li>
+  <p>Update the <code>Dockerfile</code>. Two lines are new compared with session 1: the build stage copies <code>go.sum</code> along with <code>go.mod</code>, and downloads the modules <em>before</em> it copies your code. Dependencies change rarely, so that download is a cached layer. Changing <code>main.go</code> only rebuilds the steps after <code>COPY . .</code>.</p>
+  <p class="filename">Dockerfile</p>
+<pre class="file">FROM golang:1.27 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /server .
+
+FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=build /server /server
+EXPOSE 8080
+USER 65532:65532
+ENTRYPOINT ["/server"]</pre>
+  <p class="note">This file leaves out the <code>/data</code> volume from session 1, because the server never writes there. If you kept it, you may leave those lines in. Keep your <code>.dockerignore</code> too, so <code>COPY . .</code> does not copy <code>.git</code>.</p>
+  <p>Build the new version and copy it into your kind cluster, as in session 1:</p>
+<pre class="cmd">docker build -t hello:0.2.0 .</pre>
+<pre class="cmd">kind load docker-image hello:0.2.0</pre>
+</li>
+
+<li>
+  <p>Name the port. A ServiceMonitor refers to a Service port by its <em>name</em>, not by its number.<sup class="cite"><a href="https://prometheus-operator.dev/docs/developer/getting-started/">[12]</a></sup> In <code>k8s/deployment.yaml</code>, change the image to <code>hello:0.2.0</code> and give the container port the name <code>http</code>. Two replicas are enough here, and they save memory for the monitoring stack.</p>
+  <p class="filename">k8s/deployment.yaml</p>
+<pre class="file">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+        - name: hello
+          image: hello:0.2.0
+          ports:
+            - name: http
+              containerPort: 8080</pre>
+  <p class="note">If your file has the <code>resources</code> and probes from session 1, lesson 08, keep them. The file above shows only what this lesson needs.</p>
+  <p>In <code>k8s/service.yaml</code>, name the Service port <code>http</code> too, and point <code>targetPort</code> at the container port's name:</p>
+  <p class="filename">k8s/service.yaml</p>
+<pre class="file">apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  selector:
+    app: hello
+  ports:
+    - name: http          # the ServiceMonitor finds the port by this name
+      port: 80
+      targetPort: http</pre>
+  <p>Note the new <code>labels</code> on the Service itself. A ServiceMonitor selects <em>Services</em> by their labels, not Pods.</p>
+</li>
+
+<li>
+  <p>Write the ServiceMonitor. Copy the <code>release: kps</code> label exactly: without it, lesson 04 showed you, nothing happens and nothing complains.</p>
+  <p class="filename">k8s/servicemonitor.yaml</p>
+<pre class="file">apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hello
+  labels:
+    release: kps          # the label the stack's Prometheus selects on
+spec:
+  selector:
+    matchLabels:
+      app: hello          # Services with this label
+  endpoints:
+    - port: http          # the Service port *name*
+      path: /metrics
+      interval: 15s</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/hello created
+service/hello created
+servicemonitor.monitoring.coreos.com/hello created</pre>
+  </details>
+  <p>If you already had <code>hello</code> running, you see <code>configured</code> instead of <code>created</code> for the Deployment and the Service.</p>
+</li>
+
+<li>
+  <p>Try the server. In a second terminal, forward a local port to the Service:</p>
+<pre class="cmd">kubectl port-forward svc/hello 8080:80</pre>
+  <p>Back in the first terminal, make one normal request, one error, and one request to a path you never defined. Then read the metrics.</p>
+<pre class="cmd">curl localhost:8080/</pre>
+<pre class="cmd">curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/boom</pre>
+<pre class="cmd">curl localhost:8080/nope</pre>
+<pre class="cmd">curl -s localhost:8080/metrics | grep -E '^http_requests_total|^http_request_duration_seconds_count'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>hello from my container
+500
+hello from my container
+http_request_duration_seconds_count{path="GET /"} 2
+http_request_duration_seconds_count{path="GET /boom"} 1
+http_requests_total{path="GET /",status="200"} 2
+http_requests_total{path="GET /boom",status="500"} 1</pre>
+  </details>
+  <p>Look at the count for <code>GET /</code>: 2. The pattern <code>GET /</code> catches every path no other pattern claims, so <code>/nope</code> was counted there. There is no <code>/nope</code> series, and no URL anyone sends can create one. That is the cardinality rule, working.</p>
+  <p class="note">A request that matches no pattern at all, such as a <code>POST</code>, gets an empty <code>r.Pattern</code>.<sup class="cite"><a href="https://pkg.go.dev/net/http#Request">[4]</a></sup> It is counted with <code>path=""</code>: one more series, still bounded.</p>
+</li>
+
+<li>
+  <p>Make traffic. In a <strong>third</strong> terminal, start a loop that sends one good request and one failing request, five times a second. Leave it running.</p>
+<pre class="cmd">while true; do curl -s -o /dev/null localhost:8080/; curl -s -o /dev/null localhost:8080/boom; sleep 0.2; done</pre>
+  <p>Half of these requests fail. That is far above any sane error budget, which is the point: your alert will catch it.</p>
+</li>
+
+<li>
+  <p>Open Prometheus. In a fourth terminal:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090</pre>
+  <p>Open <code>http://localhost:9090</code>, then <strong>Status → Target health</strong>. Find the pool <code>serviceMonitor/default/hello/0</code>. It can take up to a minute to appear, as in lesson 04.</p>
+  <details class="expect"><summary>Expected targets: job, pod, state (your Pod names differ)</summary>
+<pre>hello   hello-f5645869f-4c29l   up
+hello   hello-f5645869f-lzr4c   up</pre>
+  </details>
+  <p>Two targets: one per Pod, at the Pod's own IP. The operator follows the Service's EndpointSlices, so Prometheus scrapes every Pod, not the Service. The <code>job</code> label is the Service's name. Now, on the <strong>Query</strong> page, run:</p>
+<pre>http_requests_total{job="hello", path="GET /metrics"}</pre>
+  <details class="expect"><summary>Expected output (one of two series)</summary>
+<pre>http_requests_total{container="hello", endpoint="http", instance="10.244.0.26:8080", job="hello", namespace="default", path="GET /metrics", pod="hello-f5645869f-4c29l", service="hello", status="200"}</pre>
+  </details>
+  <p>Your code set two labels, <code>path</code> and <code>status</code>. The rest were added by Prometheus from the ServiceMonitor: where the series came from.</p>
+</li>
+
+<li>
+  <p>Ask the four RED questions. Run each query on the Query page. Wait two minutes after starting the loop, so each one-minute window is full.</p>
+  <p><strong>Rate</strong>, per series:</p>
+<pre>rate(http_requests_total{job="hello"}[1m])</pre>
+  <details class="expect"><summary>Expected output (path, status, pod, requests per second)</summary>
+<pre>GET /         200   hello-...-4c29l   7.73
+GET /boom     500   hello-...-4c29l   7.73
+GET /metrics  200   hello-...-4c29l   0.0667
+GET /metrics  200   hello-...-lzr4c   0.0667</pre>
+  </details>
+  <p>Look at the pods. All your traffic went to <code>4c29l</code>; <code>lzr4c</code> only saw the scrapes, one every 15 seconds (1/15 = 0.0667 per second). <code>kubectl port-forward svc/hello</code> does not balance load: it picks one Pod behind the Service and tunnels to it. Real traffic, through the Service's cluster IP, would be spread over both.</p>
+  <p><strong>Rate</strong>, summed by status. <code>sum by (status)</code> adds up the series and keeps only the <code>status</code> label:</p>
+<pre>sum by (status) (rate(http_requests_total{job="hello"}[1m]))</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>{status="200"}   7.87
+{status="500"}   7.73</pre>
+  </details>
+  <p><strong>Errors</strong>, as a ratio of all requests:</p>
+<pre>sum(rate(http_requests_total{job="hello", status=~"5.."}[1m])) / sum(rate(http_requests_total{job="hello"}[1m]))</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>0.4957</pre>
+  </details>
+  <p>Almost exactly half. Slightly under, because the scrapes of <code>/metrics</code> are successful requests too. <code>=~"5.."</code> is a regular expression: any status from 500 to 599.</p>
+  <p><strong>Duration</strong>, the 95th percentile:</p>
+<pre>histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="hello"}[1m])))</pre>
+  <details class="expect"><summary>Expected output (seconds)</summary>
+<pre>0.00475</pre>
+  </details>
+  <p>4.75&nbsp;ms. Each bucket is a series of its own, labelled <code>le</code> ("less than or equal"). <code>sum by (le)</code> merges the Pods and routes but keeps the buckets apart, which is what <code>histogram_quantile</code> needs.<sup class="cite"><a href="https://prometheus.io/docs/practices/histograms/">[7]</a></sup> Your requests really take far less than a millisecond. They all fall into the lowest bucket, 0 to 5&nbsp;ms, and interpolation inside it gives 4.75&nbsp;ms. Buckets set the precision.</p>
+</li>
+
+<li>
+  <p>Put the three answers on a dashboard. In a fifth terminal, forward Grafana, then read the admin password from its Secret:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-grafana 3000:80</pre>
+<pre class="cmd">kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d</pre>
+  <p>Open <code>http://localhost:3000</code> and log in as <code>admin</code> with that password. Then:</p>
+  <ol>
+    <li><strong>Dashboards → New → New dashboard → Add visualization</strong>, and pick the <strong>Prometheus</strong> data source.</li>
+    <li>Switch the query editor to <strong>Code</strong>, paste the rate query summed by status, and give the panel the title <em>Rate</em>.</li>
+    <li>Add a second panel with the error ratio, title <em>Errors</em>, and a third with the 95th percentile, title <em>Duration p95</em>. In the panel options you can set the unit to "Percent (0.0-1.0)" and "seconds".</li>
+    <li>Save the dashboard as <em>hello</em>.</li>
+  </ol>
+  <p>A dashboard you clicked together lives only in Grafana's database. Put it in Git. Open <strong>Export</strong> on the dashboard and export it as JSON. (Newer Grafana versions call this <strong>Export as code</strong>, with the "Classic" model.)<sup class="cite"><a href="https://grafana.com/docs/grafana/latest/dashboards/share-dashboards-panels/">[13]</a></sup> Save the file as <code>dashboards/hello.json</code> in your repository.</p>
+  <p class="note">Optional: let Grafana load the file by itself. The stack's Grafana Pod runs a sidecar container that watches for ConfigMaps labelled <code>grafana_dashboard=1</code>, and loads the JSON inside them as dashboards. Every built-in dashboard of the stack arrives this way: <code>kubectl -n monitoring get cm -l grafana_dashboard=1</code> lists them. So a ConfigMap in <code>monitoring</code> holding your <code>hello.json</code>, with that label, puts your dashboard back after any reinstall. It is one more watch loop, like the operators from lesson 02 of this session.</p>
+</li>
+
+<li>
+  <p>Write the alert. Fire when more than 5&nbsp;% of requests fail, for two minutes straight. The expression is your error ratio with a threshold.</p>
+  <p class="filename">k8s/prometheusrule.yaml</p>
+<pre class="file">apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hello
+  labels:
+    release: kps
+spec:
+  groups:
+    - name: hello
+      rules:
+        - alert: HelloHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job="hello", status=~"5.."}[1m]))
+              /
+            sum(rate(http_requests_total{job="hello"}[1m])) &gt; 0.05
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "More than 5% of hello requests fail"</pre>
+<pre class="cmd">kubectl apply -f k8s/prometheusrule.yaml</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>prometheusrule.monitoring.coreos.com/hello created</pre>
+  </details>
+  <p>The <code>&gt; 0.05</code> is a filter: the expression returns a result only while the ratio is above 0.05. A result means "active". <code>severity</code> is a label that Alertmanager can use to route the alert, and <code>summary</code> is the text a human reads.</p>
+</li>
+
+<li>
+  <p>Watch it fire. Your loop is still running, so the ratio is about 0.5. In Prometheus, open <strong>Alerts</strong> and find <code>HelloHighErrorRate</code>. Reload every 15 seconds or so. Once the operator has loaded the rule (up to a minute), the alert goes from <em>inactive</em> to <em>pending</em>, and two minutes after that to <em>firing</em>.</p>
+  <details class="expect"><summary>Expected output (our run, checked every 15 seconds)</summary>
+<pre>t=15s..75s  state=pending  activeAt=09:31:06
+t=90s       state=firing</pre>
+  </details>
+  <p>We started checking about half a minute after the rule became active at 09:31:06. It was pending until the full two minutes had passed since then, and firing on the next check. Now look at Alertmanager. In one more terminal:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-alertmanager 9093:9093</pre>
+  <p>Open <code>http://localhost:9093</code>.</p>
+  <details class="expect"><summary>Expected alerts</summary>
+<pre>HelloHighErrorRate   active
+Watchdog             active</pre>
+  </details>
+  <p><code>Watchdog</code> always fires, on purpose. It is a dead man's switch: if it ever stops arriving somewhere, you know the alerting pipeline itself is broken.</p>
+</li>
+
+<li>
+  <p>Stop the loop with Ctrl+C. Within a minute, no <code>/boom</code> requests are left in the one-minute window, the ratio drops to 0, and the expression returns nothing. The alert turns inactive in Prometheus and disappears from Alertmanager's active list.</p>
+</li>
+
+<li>
+  <p>Commit your work. Run <code>git status</code> first: you should see your code, its dependencies, the Dockerfile, four manifests and the dashboard.</p>
+<pre class="cmd">git add main.go go.mod go.sum Dockerfile k8s/ dashboards/hello.json</pre>
+<pre class="cmd">git commit -m "Instrument hello with Prometheus metrics, add ServiceMonitor, alert and dashboard"</pre>
+<pre class="cmd">git push</pre>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>With the new server running, you <code>curl localhost:8080/nope</code> three times, then read <code>/metrics</code>. What changed?</legend>
+  <button class="opt" data-why="No. The label holds the matched pattern, never the raw URL. /nope matches the pattern GET /.">A new series with path /nope appears and counts three requests</button>
+  <button class="opt" data-why="No. GET / catches every path no other pattern claims, so the server answers 200, not 404.">A new series with status 404 appears there, counting three requests</button>
+  <button class="opt" data-why="Right. /nope matched the catch-all pattern GET /, so it counts under path=&quot;GET /&quot;, status=&quot;200&quot;. No new series.">The GET / series grows by three; no new line appears</button>
+  <button class="opt" data-why="No. The middleware wraps the whole mux, so every request is counted.">Nothing changes at all, because unmatched paths are never counted anywhere</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why does the middleware label requests by <code>r.Pattern</code> and not by the raw URL path?</legend>
+  <button class="opt" data-why="Right. Every distinct label value is a new series. Patterns are a fixed handful; raw paths are whatever anyone sends.">Raw paths are unbounded, so every new URL adds a series</button>
+  <button class="opt" data-why="No. A label value may be any text. GET / already contains a slash.">Prometheus always rejects any label value that contains a slash character</button>
+  <button class="opt" data-why="No. The length of a value is not the issue. The number of distinct values is.">The pattern is shorter, so every scrape is a little faster</button>
+  <button class="opt" data-why="No. The raw path is always there in r.URL.Path. The problem is what it would do to Prometheus.">Raw paths are hidden from middleware once the handler has run</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>Two Pods run behind the Service. Your load loop goes through <code>kubectl port-forward svc/hello 8080:80</code>. What does <code>rate(http_requests_total[1m])</code> show per Pod?</legend>
+  <button class="opt" data-why="No. port-forward does not use the Service's load balancing. It picks one Pod.">Both Pods get about half, because the Service balances every request</button>
+  <button class="opt" data-why="Right. port-forward tunnels to one Pod. The other only shows /metrics, at 1/15 = 0.0667 per second.">One Pod gets all the requests; the other gets only scrapes</button>
+  <button class="opt" data-why="No. Each request travels to exactly one Pod. Nothing copies traffic.">Each Pod gets every request, because port-forward copies all the traffic</button>
+  <button class="opt" data-why="No. The middleware runs inside your server, so every request that reaches it is counted.">Neither Pod is counted, because port-forward traffic skips your instrument middleware</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Why does a graph show <code>rate(http_requests_total[1m])</code> and not the raw counter?</legend>
+  <button class="opt" data-why="No. Prometheus keeps the raw samples for its whole retention time. The window only says which samples rate looks at.">The raw counter is kept for one minute, then Prometheus deletes it</button>
+  <button class="opt" data-why="No. rate works on any counter. Filtering on status is what picks out the errors.">rate counts the errors only, which is what a dashboard should show</button>
+  <button class="opt" data-why="No. A counter grows for the whole life of the process. It resets only on a restart.">A counter resets every scrape, so its raw value is always tiny</button>
+  <button class="opt" data-why="Right. The raw value is a total since start. rate turns it into per-second change and adjusts for resets after restarts.">A counter only grows; rate gives requests per second and handles restarts</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>Your rule has <code>for: 2m</code>. The error ratio jumps to 0.5 and stays there. What do you see in Prometheus under Alerts?</legend>
+  <button class="opt" data-why="No. for is evaluated by Prometheus. The alert only reaches Alertmanager once it fires.">Firing at once, then Alertmanager waits two minutes before it notifies</button>
+  <button class="opt" data-why="No. The alert is pending from the first evaluation that returns a result. No one acknowledges anything.">Inactive for two minutes, then pending until someone acknowledges the alert</button>
+  <button class="opt" data-why="Right. Active but not yet firing is pending. After two minutes of the condition holding, it fires.">Pending, then firing once the condition has held for two minutes</button>
+  <button class="opt" data-why="No. A firing alert stays firing while the condition holds. for only delays the start.">Firing for two minutes, then it resolves by itself and stops</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>You apply your PrometheusRule but forget the label <code>release: kps</code>. What happens?</legend>
+  <button class="opt" data-why="No. To the API server, labels are optional. The object is accepted.">kubectl apply fails, saying that the release label is missing</button>
+  <button class="opt" data-why="No. Prometheus never loads the rule, so there is no alert to send.">Prometheus loads it, but Alertmanager drops every alert it sends</button>
+  <button class="opt" data-why="No. The operator does not change your objects. It only selects those that match ruleSelector.">The operator adds the missing label on the next sync</button>
+  <button class="opt" data-why="Right. ruleSelector does not match, so the operator leaves the rule out of Prometheus. No error anywhere, like the ServiceMonitor in lesson 04.">It is accepted, but the alert never appears in Prometheus</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>What does <code>histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[1m])))</code> return?</legend>
+  <button class="opt" data-why="No. A histogram keeps bucket counts, not single requests. That is why the answer is an estimate.">The slowest request in the last window, measured exactly in seconds</button>
+  <button class="opt" data-why="Right. The 95th percentile, estimated by interpolating inside the bucket where it falls.">An estimate: 95% of requests finished faster than this many seconds</button>
+  <button class="opt" data-why="No. 0.95 is the quantile, not a duration. The result is in seconds.">The share of all requests that took longer than 0.95 seconds</button>
+  <button class="opt" data-why="No. A quantile is not an average. Average would be the _sum divided by the _count.">The average duration of the fastest 95 percent of all requests</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>The RED method names three things to watch for every request-serving service. Which list is it?</legend>
+  <button class="opt" data-why="Right. Rate, Errors, Duration: your rate query, your error ratio, and your 95th percentile.">Requests per second, failing requests, and how long requests take</button>
+  <button class="opt" data-why="No. Those describe the cluster, not the requests your service answers.">Restarts per Pod, Events per node, and Deployments per namespace</button>
+  <button class="opt" data-why="No. Only the E is close, and RED counts failing requests, not log lines.">Replicas wanted, errors logged, and disk space used by Prometheus</button>
+  <button class="opt" data-why="No. D is the duration of requests, not of deployments, and R is their rate.">Read latency, write errors, and the duration of each deployment</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://prometheus.io/docs/practices/instrumentation/">Prometheus: Instrumentation</a>. What to measure in online services, batch jobs and libraries, and how far to go with labels. About fifteen minutes.
+</div>
+
+<p class="ask">Target not showing up, or an alert that never fires? Ask your instructor, with the output of <code>kubectl get servicemonitor,prometheusrule -o yaml</code>.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus: Metric types</a> ·
+[2] <a href="https://prometheus.io/docs/practices/naming/">Prometheus: Metric and label naming</a> ·
+[3] <a href="https://prometheus.io/docs/practices/instrumentation/">Prometheus: Instrumentation</a> ·
+[4] <a href="https://pkg.go.dev/net/http#Request">Go: net/http, Request.Pattern</a> ·
+[5] <a href="https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/">Grafana: The RED Method</a> ·
+[6] <a href="https://prometheus.io/docs/prometheus/latest/querying/functions/">Prometheus: Query functions</a> ·
+[7] <a href="https://prometheus.io/docs/practices/histograms/">Prometheus: Histograms and summaries</a> ·
+[8] <a href="https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/">Prometheus: Alerting rules</a> ·
+[9] <a href="https://prometheus-operator.dev/docs/developer/alerting/">Prometheus Operator: Alerting</a> ·
+[10] <a href="https://go.dev/doc/modules/managing-dependencies">Go: Managing dependencies</a> ·
+[11] <a href="https://pkg.go.dev/github.com/prometheus/client_golang/prometheus/promauto">client_golang: promauto</a> ·
+[12] <a href="https://prometheus-operator.dev/docs/developer/getting-started/">Prometheus Operator: Getting started</a> ·
+[13] <a href="https://grafana.com/docs/grafana/latest/dashboards/share-dashboards-panels/">Grafana: Share dashboards and panels</a>.
+Commands verified 2026-11-19 on kind v0.33.0, kubectl 1.37.1, Go 1.27.1, client_golang v1.25.0, kube-prometheus-stack 93.4.1 (macOS).</p>
+
+<nav class="pager"><a href="s3-04-config-file-vs-operator.html">← previous: config file vs. operator</a><a href="s3-06-logs-loki-alloy.html">next: logs with Loki and Alloy →</a></nav>
+
+</main>
+</body>
+</html>

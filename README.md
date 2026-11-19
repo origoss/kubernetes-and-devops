@@ -33,6 +33,22 @@ Open the lessons in a browser. Each one is a short, self-contained HTML page wit
 |---|---|---|---|
 | 01 | [Push to GHCR](lessons/s2-01-push-ghcr.html) | 10' | after |
 
+## Session 3: operators and observability
+
+Before the session, run [scripts/s3-preflight.sh](scripts/s3-preflight.sh) at home: it checks Helm and Docker memory and pulls the monitoring stack's images, which are too big for the room's wifi.
+
+| # | Lesson | Time | When |
+|---|---|---|---|
+| 01 | [Install someone else's app with Helm](lessons/s3-01-helm-consumer.html) | 20' | before |
+| 02 | [The operator pattern: CRDs and the control loop](lessons/s3-02-operator-pattern.html) | 20' | before |
+| 03 | [kube-prometheus-stack: install it and meet its parts](lessons/s3-03-kube-prometheus-stack.html) | 25' | after |
+| 04 | [Edit the config file vs. let the operator do it](lessons/s3-04-config-file-vs-operator.html) | 30' | after |
+| 05 | [Instrument your app, query it, alert on it](lessons/s3-05-instrument-and-alert.html) | 35' | after |
+| 06 | [Logs with Loki and Alloy: from symptom to cause](lessons/s3-06-logs-loki-alloy.html) | 30' | after |
+| 07 | [Recap quiz](lessons/s3-07-recap-quiz.html) | ~12' | before session 4 |
+
+Session 3 [cheat sheet](reference/s3-cheat-sheet.html). Every file the lessons use is in [examples/s3/](examples/s3/).
+
 The pre-flight lesson uses [scripts/preflight.sh](scripts/preflight.sh) to check your laptop.
 
 Session 1 [cheat sheet](reference/s1-cheat-sheet.html): every command, the Deployment + Service YAML and a symptom → where-to-look table on one printable A4 page.

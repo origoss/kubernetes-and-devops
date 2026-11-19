@@ -28,3 +28,21 @@ _Avoid_: "challenge".
 _Avoid_: "a lightweight VM".
 
 **Registry**: A server that stores and serves images (Docker Hub, GHCR).
+
+**Chart**: A Helm package: templates plus default values that render into ordinary Kubernetes YAML.
+
+**Release**: One installed instance of a chart in a cluster, with numbered revisions Helm can roll back to.
+_Avoid_: "deployment" for a release; a Deployment is a Kubernetes object.
+
+**Values file**: The YAML file of parameters you pass to a chart with `-f`. Committed to git so anyone can reproduce the install.
+
+**Custom resource definition (CRD)**: A new kind of object (a new noun) added to the Kubernetes API. The CRD is the "class"; a **custom resource** is one object of that kind.
+
+**Controller**: A program that watches objects in the API and changes the world until it matches them, again and again. The Deployment controller is one.
+
+**Operator**: A controller for your own custom resources that carries the operational knowledge of one piece of software (here: Prometheus).
+_Avoid_: "a template" or "an installer"; Helm installs, the operator keeps running.
+
+**Level-triggered**: Acting on the whole current state rather than on single events, so a missed event is caught up on the next pass.
+
+**ServiceMonitor**: A custom resource that tells the Prometheus operator which Services to scrape. It replaces hand-written scrape config.

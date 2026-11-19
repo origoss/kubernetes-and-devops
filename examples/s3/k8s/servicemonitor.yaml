@@ -1,0 +1,14 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hello
+  labels:
+    release: kps          # the label the stack's Prometheus selects on
+spec:
+  selector:
+    matchLabels:
+      app: hello          # Services with this label
+  endpoints:
+    - port: http          # the Service port *name*
+      path: /metrics
+      interval: 15s

@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helm as a consumer</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Helm · about 20 minutes · do it before the session</p>
+<h1>Install someone else's app with Helm</h1>
+
+<div class="win">
+  <strong>Your win:</strong> you installed, upgraded, rolled back and removed an app you did not write, driven by one small values file you can commit to git. You can say where Helm turns a chart into YAML, and where it keeps its history.
+</div>
+
+<p class="meta">Before this: session 1 and <a href="s2-01-push-ghcr.html">session 2</a>. Your kind cluster runs (<code>kind create cluster</code> if you deleted it), and you have the course repository; run <code>git pull</code> in it, because this lesson's example file is in <code>examples/s3/</code>.</p>
+
+<h2>Why a package manager</h2>
+
+<p>In session 1 you wrote two objects by hand: a Deployment and a Service. That was fine for one small server. In the session you install a monitoring stack called kube-prometheus-stack. Even trimmed down to fit on a laptop, it is <strong>84 objects</strong>: Deployments, Services, ConfigMaps, Secrets, access rules, thirty sets of alerting rules, plus ten new <em>kinds</em> of object. Nobody <code>kubectl apply</code>s that by hand, and nobody wants to upgrade it by hand next month.</p>
+
+<p>You need four things: the objects packed together, a few knobs you can turn, a version you can upgrade and roll back, and a clean way to remove all of it. That is what <strong>Helm</strong>, the package manager for Kubernetes, gives you. Today you only <em>use</em> packages other people wrote. Writing your own is a separate skill.</p>
+
+<h2>Four words</h2>
+
+<table>
+  <thead><tr><th>Word</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><strong>chart</strong></td><td>The package: templates for "all of the resource definitions needed to run an application", plus default settings.<sup class="cite"><a href="https://helm.sh/docs/intro/introduction">[1]</a></sup></td></tr>
+    <tr><td><strong>values</strong></td><td>The settings. The chart ships defaults in its <code>values.yaml</code>; you override only what you need, in your own file.</td></tr>
+    <tr><td><strong>release</strong></td><td>"An instance of a chart running in a Kubernetes cluster."<sup class="cite"><a href="https://helm.sh/docs/intro/introduction">[1]</a></sup> It has a name you choose. Install the same chart twice with two names and you get two releases.</td></tr>
+    <tr><td><strong>repository</strong></td><td>Where charts are published. Classic repositories are plain web servers. Charts can also live in an OCI registry, the same kind of registry that holds images, so <code>ghcr.io</code> from <a href="s2-01-push-ghcr.html">session 2</a> can store charts too.<sup class="cite"><a href="https://helm.sh/docs/topics/registries/">[2]</a></sup></td></tr>
+  </tbody>
+</table>
+
+<h2>How it works</h2>
+
+<p>Helm is a program on <strong>your laptop</strong>. It "runs on your local machine and talks to the Kubernetes API server", exactly like <code>kubectl</code>, with the same kubeconfig.<sup class="cite"><a href="https://helm.sh/docs/intro/introduction">[1]</a></sup> Nothing Helm-specific runs in the cluster.</p>
+
+<pre>chart templates  ──┐
+default values   ──┼──►  helm, on YOUR laptop  ──►  plain YAML  ──►  kube-apiserver
+your values file ──┘     fills in the templates     Deployment,          │
+                                                     Service, ...         │
+                                                                          ▼
+                                                    the same objects you wrote by hand
+                                                    + one Secret per revision:
+                                                      sh.helm.release.v1.&lt;name&gt;.v&lt;N&gt;</pre>
+
+<ol>
+  <li>Helm takes the chart's templates, the chart's default values and your values file, and fills in the templates. This <strong>rendering</strong> happens on your laptop. <code>helm template</code> does only this step and prints the result: "Render chart templates locally and display the output."<sup class="cite"><a href="https://helm.sh/docs/helm/helm_template/">[3]</a></sup></li>
+  <li>The result is plain Kubernetes YAML: the same Deployments and Services you wrote yourself in <a href="s1-07-pod-deployment-service.html">lesson 07</a>. Helm sends them to the kube-apiserver, and from there everything works as you already know.</li>
+  <li>Helm writes down what it did. By default, "release information is stored in Secrets in the namespace of the release", one Secret per revision, named <code>sh.helm.release.v1.&lt;name&gt;.v&lt;N&gt;</code>.<sup class="cite"><a href="https://helm.sh/docs/topics/advanced/">[4]</a></sup> Each one holds that revision's record: the chart, the values you supplied, and the rendered YAML. That record is what <code>helm history</code> lists and what <code>helm rollback</code> goes back to.</li>
+</ol>
+
+<p>Every install, upgrade or rollback adds a revision. "The first revision number is always 1", and each change adds 1.<sup class="cite"><a href="https://helm.sh/docs/intro/using_helm/">[5]</a></sup> A rollback does not rewind the counter: it creates a <em>new</em> revision whose content is copied from an old one.</p>
+
+<h2>One command, every time</h2>
+
+<p><code>helm install</code> fails if the release exists; <code>helm upgrade</code> fails if it does not. <code>helm upgrade --install</code> does the right one: "if a release by this name doesn't already exist, run an install".<sup class="cite"><a href="https://helm.sh/docs/helm/helm_upgrade/">[6]</a></sup> So the first install and every later change use the <strong>same command</strong>. Like <code>kubectl apply</code>, it is safe to run again: unchanged values give the same objects.</p>
+
+<p>And the values go in a <strong>file</strong>, not on the command line. You could type <code>--set replicaCount=3</code>, but then the only record of your choice is your shell history. A file in git is reviewed, dated, and gives the same release on a fresh cluster. It is the same rule as lesson 07: commands forget, files remember.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Install Helm. On macOS:</p>
+<pre class="cmd">brew install helm</pre>
+  <p>On Linux or Windows, follow the official <a href="https://helm.sh/docs/intro/install/">Installing Helm</a> page.<sup class="cite"><a href="https://helm.sh/docs/intro/install/">[7]</a></sup> Then check the version:</p>
+<pre class="cmd">helm version</pre>
+  <details class="expect"><summary>Expected output (your patch version may be newer)</summary>
+<pre>version.BuildInfo{Version:"v4.3.0", GitCommit:"v4.3.0", GitTreeState:"clean", GoVersion:"go1.26.8", KubeClientVersion:"v1.37"}</pre>
+  </details>
+  <p class="note">You need Helm 4: the version must start with <code>v4</code>. Older blog posts show Helm 3 or even Helm 2; most commands are the same, but a few flags changed.</p>
+</li>
+
+<li>
+  <p>Add the repository of <strong>podinfo</strong>, a tiny demo web app that exists for exactly this kind of practice. Then search it.</p>
+<pre class="cmd">helm repo add podinfo https://stefanprodan.github.io/podinfo</pre>
+<pre class="cmd">helm search repo podinfo</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>"podinfo" has been added to your repositories
+NAME           	CHART VERSION	APP VERSION	DESCRIPTION
+podinfo/podinfo	6.17.0       	6.17.0     	Podinfo Helm chart for Kubernetes</pre>
+  </details>
+  <p>Two versions: the <em>chart</em> version (the package) and the <em>app</em> version (the software inside it). They can differ; here they happen to match.</p>
+</li>
+
+<li>
+  <p>Read the knobs. Every value the chart understands is listed, with its default.</p>
+<pre class="cmd">helm show values podinfo/podinfo --version 6.17.0 | less</pre>
+  <details class="expect"><summary>Expected output (327 lines; the parts you need)</summary>
+<pre># Default values for podinfo.
+
+replicaCount: 1
+logLevel: info
+...
+image:
+  repository: ghcr.io/stefanprodan/podinfo
+  tag: 6.17.0
+  pullPolicy: IfNotPresent
+...
+ui:
+  color: "#34577c"
+  message: ""</pre>
+  </details>
+  <p>Press <kbd>q</kbd> to leave <code>less</code>. Note <code>tag: 6.17.0</code>: a pinned version, never <code>latest</code>, as in session 2.</p>
+</li>
+
+<li>
+  <p>Write your values file. It contains only what you change, nothing else. Copy it from <code>examples/s3/</code> into your own repository.</p>
+  <div class="filename">values-podinfo.yaml</div>
+<pre class="file">replicaCount: 2
+ui:
+  message: "installed with Helm"</pre>
+</li>
+
+<li>
+  <p>Render the chart on your laptop and look only at what it would create. Nothing is sent to the cluster.</p>
+<pre class="cmd">helm template demo podinfo/podinfo --version 6.17.0 -f values-podinfo.yaml | grep -E '^kind:|^# Source'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre># Source: podinfo/templates/service.yaml
+kind: Service
+# Source: podinfo/templates/deployment.yaml
+kind: Deployment
+# Source: podinfo/templates/tests/grpc.yaml
+kind: Pod
+# Source: podinfo/templates/tests/jwt.yaml
+kind: Pod
+# Source: podinfo/templates/tests/service.yaml
+kind: Pod</pre>
+  </details>
+  <p>A Service and a Deployment: the two objects from lesson 07. The three test Pods are <em>hooks</em>; Helm creates them only when you run <code>helm test</code>. Drop the <code>| grep</code> part to read the full YAML, and find <code>replicas: 2</code> and your message in it.</p>
+</li>
+
+<li>
+  <p>Rehearse the real command. <code>--dry-run=client</code> renders and shows what would happen, but changes nothing.<sup class="cite"><a href="https://helm.sh/docs/helm/helm_upgrade/">[6]</a></sup></p>
+<pre class="cmd">helm upgrade --install demo podinfo/podinfo --version 6.17.0 -f values-podinfo.yaml --dry-run=client</pre>
+  <details class="expect"><summary>Expected output (the first lines; the full YAML follows)</summary>
+<pre>Release "demo" does not exist. Installing it now.
+NAME: demo
+LAST DEPLOYED: Thu Nov 19 10:40:47 2026
+NAMESPACE: default
+STATUS: pending-install
+REVISION: 1
+DESCRIPTION: Dry run complete
+...</pre>
+  </details>
+  <p class="note">Write <code>--dry-run=client</code>, not a bare <code>--dry-run</code>. Helm 4 still accepts the bare flag but prints <code>level=WARN msg="--dry-run is deprecated and should be replaced with '--dry-run=client'"</code>. There is also <code>--dry-run=server</code>, which asks the API server to check the objects without storing them.</p>
+</li>
+
+<li>
+  <p>Install for real. <code>--version</code> pins the chart, so next month you get the same thing. <code>--wait</code> returns only when the Pods are ready.</p>
+<pre class="cmd">helm upgrade --install demo podinfo/podinfo --version 6.17.0 -f values-podinfo.yaml --wait</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>Release "demo" does not exist. Installing it now.
+NAME: demo
+LAST DEPLOYED: Thu Nov 19 10:20:41 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+1. Get the application URL by running these commands:
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl -n default port-forward deploy/demo-podinfo 8080:9898</pre>
+  </details>
+  <p><code>NOTES</code> is a message from the chart's author. Charts often print the next command you need.</p>
+</li>
+
+<li>
+  <p>Look with the tools you already know. Helm made ordinary objects.</p>
+<pre class="cmd">kubectl get deploy,svc,pods</pre>
+<pre class="cmd">helm list</pre>
+<pre class="cmd">kubectl get secret -l owner=helm</pre>
+  <details class="expect"><summary>Expected output (trimmed; your names differ)</summary>
+<pre>deployment.apps/demo-podinfo   2/2     2            2           26s
+service/demo-podinfo   ClusterIP   10.96.179.43   &lt;none&gt;        9898/TCP,9999/TCP   26s
+pod/demo-podinfo-5fc5895c7-jmv2t   1/1     Running   0          26s
+pod/demo-podinfo-5fc5895c7-qtd2v   1/1     Running   0          26s
+
+NAME	NAMESPACE	REVISION	UPDATED                             	STATUS  	CHART         	APP VERSION
+demo	default  	1       	2026-11-19 10:20:41.293351 +0100 CET	deployed	podinfo-6.17.0	6.17.0
+
+NAME                         TYPE                 DATA   AGE
+sh.helm.release.v1.demo.v1   helm.sh/release.v1   1      26s</pre>
+  </details>
+  <p>Two Pods, from your <code>replicaCount: 2</code>. One Secret: revision 1 of release <code>demo</code>. If your <code>hello</code> app from session 1 still runs, it shows up too; Helm does not touch it.</p>
+</li>
+
+<li>
+  <p>Call the app. Start the tunnel in one terminal:</p>
+<pre class="cmd">kubectl port-forward deploy/demo-podinfo 9898:9898</pre>
+  <p>In a second terminal:</p>
+<pre class="cmd">curl localhost:9898</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>{
+  "hostname": "demo-podinfo-5fc5895c7-jmv2t",
+  "version": "6.17.0",
+  ...
+  "message": "installed with Helm",</pre>
+  </details>
+  <p>Your message, from your values file. Stop the port-forward with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p>
+</li>
+
+<li>
+  <p>Change something. Edit <code>values-podinfo.yaml</code> to say <code>replicaCount: 3</code>, then run <strong>the same command</strong> as in step 7.</p>
+<pre class="cmd">helm upgrade --install demo podinfo/podinfo --version 6.17.0 -f values-podinfo.yaml --wait</pre>
+<pre class="cmd">kubectl get deploy demo-podinfo</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>Release "demo" has been upgraded. Happy Helming!
+NAME: demo
+...
+REVISION: 2
+...
+NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+demo-podinfo   3/3     3            3           ...</pre>
+  </details>
+</li>
+
+<li>
+  <p>Read the history, roll back to revision 1, and read the history again.</p>
+<pre class="cmd">helm history demo</pre>
+<pre class="cmd">helm rollback demo 1 --wait</pre>
+<pre class="cmd">helm history demo</pre>
+  <details class="expect"><summary>Expected output (your times differ)</summary>
+<pre>REVISION	UPDATED                 	STATUS    	CHART         	APP VERSION	DESCRIPTION
+1       	Thu Nov 19 10:20:41 2026	superseded	podinfo-6.17.0	6.17.0     	Install complete
+2       	Thu Nov 19 10:21:07 2026	deployed  	podinfo-6.17.0	6.17.0     	Upgrade complete
+
+Rollback was a success! Happy Helming!
+
+REVISION	UPDATED                 	STATUS    	CHART         	APP VERSION	DESCRIPTION
+1       	...                     	superseded	podinfo-6.17.0	6.17.0     	Install complete
+2       	...                     	superseded	podinfo-6.17.0	6.17.0     	Upgrade complete
+3       	...                     	deployed  	podinfo-6.17.0	6.17.0     	Rollback to 1</pre>
+  </details>
+  <p>Read the last table carefully. The rollback did <strong>not</strong> delete revision 2. It created revision 3, with the content of revision 1. History only grows, so you can always see what happened.<sup class="cite"><a href="https://helm.sh/docs/intro/using_helm/">[5]</a></sup></p>
+</li>
+
+<li>
+  <p>Check the cluster agrees, and look at what Helm stored.</p>
+<pre class="cmd">kubectl get deploy demo-podinfo</pre>
+<pre class="cmd">kubectl get secret -l owner=helm</pre>
+<pre class="cmd">helm get values demo</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+demo-podinfo   2/2     2            2           ...
+
+NAME                         TYPE                 DATA   AGE
+sh.helm.release.v1.demo.v1   helm.sh/release.v1   1      ...
+sh.helm.release.v1.demo.v2   helm.sh/release.v1   1      ...
+sh.helm.release.v1.demo.v3   helm.sh/release.v1   1      ...
+
+USER-SUPPLIED VALUES:
+replicaCount: 2
+ui:
+  message: installed with Helm</pre>
+  </details>
+  <p>Back to two Pods. Three revisions, three Secrets. <code>helm get values</code> reads the current revision's Secret and shows the values that are live now: <code>2</code>, although your file still says <code>3</code>. That is drift between the file and the cluster, exactly like <code>kubectl rollout undo</code> in lesson 07. In real work a rollback is the emergency brake; the lasting fix goes back into the file.</p>
+</li>
+
+<li>
+  <p>Remove everything the release created, in one command.</p>
+<pre class="cmd">helm uninstall demo</pre>
+<pre class="cmd">kubectl get secret -l owner=helm</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>release "demo" uninstalled
+No resources found in default namespace.</pre>
+  </details>
+  <p>The Deployment, the Service, the Pods and the history Secrets are gone. Set <code>replicaCount</code> in your file back to the value you want, and commit <code>values-podinfo.yaml</code>. In the session you install podinfo again with this file.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>You run <code>helm upgrade --install</code>. Where are the chart's templates turned into plain YAML?</legend>
+  <button class="opt" data-why="No. The kube-apiserver only ever receives plain YAML. It knows nothing about templates.">Inside the kube-apiserver, which understands Helm templates and renders them</button>
+  <button class="opt" data-why="Right. Rendering is client side. helm template shows you exactly that step, without touching the cluster.">On your laptop, by the helm client, before sending anything</button>
+  <button class="opt" data-why="No. That was Tiller, in Helm 2, and it was removed in Helm 3. Nothing Helm-specific runs in the cluster.">In a Helm server Pod that each cluster runs first</button>
+  <button class="opt" data-why="No. The kubelet starts containers from finished Pod specs. Templates are long gone by then.">On the node, by the kubelet, just before starting Pods</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You install <code>demo</code>, upgrade it to 3 replicas, then run <code>helm rollback demo 1</code>. What does <code>helm history demo</code> list?</legend>
+  <button class="opt" data-why="No. Rollback never deletes revisions. History only grows.">One revision, because rollback deletes revision two and returns to one</button>
+  <button class="opt" data-why="No. Revision 1 stays superseded. The rollback is recorded as a new revision.">Two revisions, with revision one now marked deployed and two superseded</button>
+  <button class="opt" data-why="Right. Install, upgrade and rollback each add 1. Revision 3 has the content of revision 1.">Three revisions, the third deployed and described as Rollback to 1</button>
+  <button class="opt" data-why="No. History is kept until you uninstall. It is what makes rollback possible.">Nothing at all, because history is cleared by every single rollback</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>What is inside the Secret <code>sh.helm.release.v1.demo.v2</code>?</legend>
+  <button class="opt" data-why="Right. One Secret per revision, holding the release record. helm history and helm rollback read these.">The record of revision two: chart, your values, rendered manifest</button>
+  <button class="opt" data-why="No. Helm logs in with your kubeconfig, just like kubectl. It stores no cluster password.">The password Helm uses to log in to the cluster</button>
+  <button class="opt" data-why="No. Helm backs up no application data. It records what it installed, not what the app wrote.">A backup copy of all the Pods' data and volumes</button>
+  <button class="opt" data-why="No. Your values are in it too. That is how helm get values can show them.">The chart's template files only, without any of your values</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Why commit <code>values-podinfo.yaml</code> instead of typing <code>--set replicaCount=3</code>?</legend>
+  <button class="opt" data-why="No. --set is fully supported in Helm 4. The deprecation warning you saw was about a bare --dry-run.">--set is deprecated in Helm 4 and prints a warning</button>
+  <button class="opt" data-why="No. Both end up as the same values. Speed is not the difference.">Values files are applied faster than values passed with --set</button>
+  <button class="opt" data-why="No. Helm stores --set values in the release Secret as well; helm get values shows them.">Only values from files are stored in the release Secret</button>
+  <button class="opt" data-why="Right. A file in git is reviewed and dated, and rebuilds the same release on a fresh cluster. A --set lives only in your shell history.">The file is reviewable in git and reproduces the release</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>On a fresh cluster with no release yet, you run <code>helm upgrade --install demo podinfo/podinfo ...</code>. What is the first line?</legend>
+  <button class="opt" data-why="No. That is plain helm upgrade without --install. The flag exists to avoid this.">Error: UPGRADE FAILED: there is no release yet</button>
+  <button class="opt" data-why="No. Helm never asks questions. It is meant to run unattended, in scripts and pipelines too.">A prompt asking whether to install it instead</button>
+  <button class="opt" data-why="Right. With --install, a missing release is installed. The same command upgrades it next time.">Release "demo" does not exist. Installing it now.</button>
+  <button class="opt" data-why="No. --install turns upgrade into install when the release is missing.">Nothing, because upgrade only works on existing releases</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>After an install, one upgrade and one rollback, what does <code>kubectl get secret -l owner=helm</code> list?</legend>
+  <button class="opt" data-why="No. Each revision gets its own Secret. Old ones are kept for history and rollback.">One Secret, sh.helm.release.v1.demo.v1, rewritten on each change</button>
+  <button class="opt" data-why="Right. Three revisions, three Secrets: v1, v2 and v3.">Three Secrets, from sh.helm.release.v1.demo.v1 up to v3</button>
+  <button class="opt" data-why="No. Helm keeps release history in the cluster, in the release's namespace. That is why a teammate can roll back too.">None: Helm keeps history on your laptop</button>
+  <button class="opt" data-why="No. Rollback deletes nothing. It adds revision 3.">Two Secrets: rollback deleted the v2 one</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>What is a Helm <strong>release</strong>?</legend>
+  <button class="opt" data-why="No. That is a chart version, such as 6.17.0.">A version number of a chart published in a repository</button>
+  <button class="opt" data-why="No. That is your values file. A release is what gets installed from chart plus values.">The YAML file of your own values for a chart</button>
+  <button class="opt" data-why="No. Helm does not touch git. Committing your values file is your job.">A git tag that Helm creates in your own repository</button>
+  <button class="opt" data-why="Right. demo is a release. Install the same chart as demo2 and you have a second release.">One named, installed instance of a chart in a cluster</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>After the install, you run <code>kubectl get deploy,svc</code>. What do you find for podinfo?</legend>
+  <button class="opt" data-why="Right. Helm only renders and sends plain YAML. The cluster sees ordinary objects, labelled managed-by=Helm.">A normal Deployment and Service, like those you wrote by hand</button>
+  <button class="opt" data-why="No. Plain Helm adds no new kind of object. It sends the objects from the templates as they are.">A single HelmRelease object that hides the Deployment and Service inside</button>
+  <button class="opt" data-why="No. The objects are ordinary, so kubectl sees them like any other.">Nothing, because Helm objects are only visible through the helm list</button>
+  <button class="opt" data-why="No. A chart can contain any kind of object. podinfo's has a Service.">A Deployment only, because a chart can never contain Service objects</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://helm.sh/docs/intro/using_helm/">Helm: Using Helm</a>. It walks through search, install, values, upgrade, rollback and uninstall, and explains how <code>-f</code> and <code>--set</code> combine. About fifteen minutes.
+</div>
+
+<p class="ask">A command failing, or output that looks different from this page? Ask your instructor, with the command and the full output.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://helm.sh/docs/intro/introduction">Helm: Introduction to Helm</a> ·
+[2] <a href="https://helm.sh/docs/topics/registries/">Helm: Use OCI-based registries</a> ·
+[3] <a href="https://helm.sh/docs/helm/helm_template/">Helm: helm template</a> ·
+[4] <a href="https://helm.sh/docs/topics/advanced/">Helm: Advanced Helm techniques, storage backends</a> ·
+[5] <a href="https://helm.sh/docs/intro/using_helm/">Helm: Using Helm</a> ·
+[6] <a href="https://helm.sh/docs/helm/helm_upgrade/">Helm: helm upgrade</a> ·
+[7] <a href="https://helm.sh/docs/intro/install/">Helm: Installing Helm</a>.
+Commands verified 2026-11-19 on kind v0.33.0, kubectl 1.37.1, Helm v4.3.0 (macOS).</p>
+
+<nav class="pager"><a href="s2-01-push-ghcr.html">← previous: push to GHCR</a><a href="s3-02-operator-pattern.html">next: the operator pattern →</a></nav>
+
+</main>
+</body>
+</html>

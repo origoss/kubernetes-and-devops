@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Config file vs. operator</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Operators · about 30 minutes · after the session</p>
+<h1>Two ways to add a scrape target: edit the file, or write a ServiceMonitor</h1>
+
+<div class="win">
+  <strong>Your win:</strong> you added a scrape target twice: once by hand-editing Prometheus's config, once by writing a ServiceMonitor. You watched the operator do the work, then watched it stop when you switched it off. You can say what an operator buys you, and what it costs.
+</div>
+
+<p class="meta">Before this: kube-prometheus-stack runs in your cluster from <a href="s3-03-kube-prometheus-stack.html">lesson 03</a>, and you know the words <em>CRD</em>, <em>control loop</em> and <em>level-triggered</em> from <a href="s3-02-operator-pattern.html">lesson 02</a>. You have the <code>podinfo</code> chart repository from <a href="s3-01-helm-consumer.html">lesson 01</a>. Work in your own <code>hello</code> repository; the example files are in the course repository, in <code>examples/s3/</code>.</p>
+
+<h2>The same job, two ways</h2>
+
+<p>You want Prometheus to scrape one more app. That is one of the most common changes a monitoring setup ever sees. There are two ways to make it.</p>
+
+<p><strong>The traditional way.</strong> Prometheus reads one YAML file, <code>prometheus.yml</code>. You add a job to it, and then you tell Prometheus to read it again. Prometheus "can reload its configuration at runtime": either with a <code>SIGHUP</code> signal or with an HTTP <code>POST</code> to <code>/-/reload</code>, which only works when Prometheus was started with <code>--web.enable-lifecycle</code>. "If the new configuration is not well-formed, the changes will not be applied."<sup class="cite"><a href="https://prometheus.io/docs/prometheus/latest/configuration/configuration/">[1]</a></sup> In Kubernetes that file usually comes from a ConfigMap mounted as a volume. The kubelet updates the mounted file by itself, but not at once: the delay "can be as long as the kubelet sync period + cache propagation delay".<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/configmap/">[2]</a></sup></p>
+
+<p><strong>The operator way.</strong> You never touch <code>prometheus.yml</code>. You write a small <code>ServiceMonitor</code> object next to your app. The operator sees it, regenerates the whole config, and the <code>config-reloader</code> sidecar makes Prometheus load it. Operators are "software extensions to Kubernetes that make use of custom resources to manage applications and their components", following the control loop.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">[3]</a></sup></p>
+
+<p>Reading this, the second way sounds obviously better. Do both, and feel where the difference really is. It is not where you expect.</p>
+
+<h2>Do it, part A: the traditional way</h2>
+
+<ol class="steps">
+<li>
+  <p>Put podinfo back; you removed it at the end of lesson 01. Two replicas, from the values file you already know. Copy the three files this lesson needs into your <code>monitoring/</code> folder first (same course-repository path as in lesson 03):</p>
+<pre class="cmd">cp ../kubernetes-and-devops/examples/s3/values-podinfo.yaml ../kubernetes-and-devops/examples/s3/plain-prometheus/prometheus.yaml ../kubernetes-and-devops/examples/s3/servicemonitor-podinfo.yaml monitoring/</pre>
+<pre class="cmd">helm upgrade --install demo podinfo/podinfo --version 6.17.0 -f monitoring/values-podinfo.yaml --wait</pre>
+  <p>podinfo serves Prometheus metrics on <code>/metrics</code>, port 9898, behind the Service <code>demo-podinfo</code>.</p>
+</li>
+
+<li>
+  <p>Read the plain Prometheus. It is the S1 pattern: a ConfigMap and a Deployment, nothing else. The ConfigMap holds the whole <code>prometheus.yml</code>, and the Deployment mounts it at <code>/etc/prometheus</code>.</p>
+  <p class="filename">monitoring/prometheus.yaml</p>
+<pre class="file">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plain-prometheus
+  namespace: plain
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plain-prometheus
+  namespace: plain
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plain-prometheus
+  template:
+    metadata:
+      labels:
+        app: plain-prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.16.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: plain-prometheus</pre>
+  <p>Note <code>--web.enable-lifecycle</code>: without it, the reload endpoint you need in a minute does not exist.</p>
+<pre class="cmd">kubectl create namespace plain</pre>
+<pre class="cmd">kubectl apply -f monitoring/prometheus.yaml</pre>
+<pre class="cmd">kubectl -n plain rollout status deploy/plain-prometheus</pre>
+</li>
+
+<li>
+  <p>Port-forward in a second terminal. Use 9091, so it does not clash with the kps Prometheus on 9090:</p>
+<pre class="cmd">kubectl -n plain port-forward deploy/plain-prometheus 9091:9090</pre>
+  <p>Open <a href="http://localhost:9091">http://localhost:9091</a> → <strong>Status → Target health</strong>. One target: Prometheus scraping itself. With <code>jq</code> you can watch the same list from the terminal; you will run this line many times:</p>
+<pre class="cmd">curl -s localhost:9091/api/v1/targets | jq -r '.data.activeTargets[] | "\(.labels.job) \(.health) \(.scrapeUrl)"'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>prometheus up http://localhost:9090/metrics</pre>
+  </details>
+</li>
+
+<li>
+  <p><strong>Edit the file.</strong> In <code>monitoring/prometheus.yaml</code>, add a second job under <code>scrape_configs</code>. Keep the indentation: it sits inside the <code>prometheus.yml: |</code> block, so it is YAML inside YAML.</p>
+<pre class="file">    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+      - job_name: podinfo
+        static_configs:
+          - targets: ["demo-podinfo.default.svc:9898"]</pre>
+<pre class="cmd">kubectl apply -f monitoring/prometheus.yaml</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>configmap/plain-prometheus configured
+deployment.apps/plain-prometheus unchanged</pre>
+  </details>
+  <p>Now run the <code>curl … | jq</code> line again, or refresh the UI.</p>
+  <details class="expect"><summary>Expected output</summary>
+<pre>prometheus up http://localhost:9090/metrics</pre>
+  </details>
+  <p>Nothing. The ConfigMap in the API changed. The file inside the Pod did not, yet.</p>
+</li>
+
+<li>
+  <p><strong>Watch the file.</strong> Print it from inside the Pod; repeat every 15 seconds or so until the podinfo job shows up:</p>
+<pre class="cmd">kubectl -n plain exec deploy/plain-prometheus -- cat /etc/prometheus/prometheus.yml</pre>
+  <p>In our run the file changed after <strong>61 seconds</strong>. That is the kubelet's periodic sync of mounted ConfigMaps, the delay the Kubernetes docs warn about.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/configmap/">[2]</a></sup> Now check the targets once more.</p>
+  <details class="expect"><summary>Expected output</summary>
+<pre>prometheus up http://localhost:9090/metrics</pre>
+  </details>
+  <p><strong>Still nothing.</strong> The file is new, but Prometheus read it at startup and does not watch it. Somebody has to tell it.</p>
+</li>
+
+<li>
+  <p><strong>Reload, by hand.</strong></p>
+<pre class="cmd">curl -X POST localhost:9091/-/reload</pre>
+  <p>It prints nothing: success. Wait one scrape interval (15 seconds), then look again.</p>
+  <details class="expect"><summary>Expected output</summary>
+<pre>podinfo up http://demo-podinfo.default.svc:9898/metrics
+prometheus up http://localhost:9090/metrics</pre>
+  </details>
+  <p>There it is, after three steps and more than a minute. Look at the address: it is the <em>Service</em>. Prometheus sees one target. It has no idea that two podinfo Pods sit behind it; each scrape lands on whichever Pod the Service picks.</p>
+</li>
+
+<li>
+  <p><strong>The typo.</strong> Add one misspelled line right under <code>- job_name: podinfo</code>, as if you wanted a different interval for this job:</p>
+<pre class="file">      - job_name: podinfo
+        scrape_intervall: 15s
+        static_configs:
+          - targets: ["demo-podinfo.default.svc:9898"]</pre>
+<pre class="cmd">kubectl apply -f monitoring/prometheus.yaml</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>configmap/plain-prometheus configured
+deployment.apps/plain-prometheus unchanged</pre>
+  </details>
+  <p>Accepted. To Kubernetes, <code>prometheus.yml</code> is one long string: nobody checks what is inside. Wait for the file to sync (the <code>exec cat</code> again, about a minute), then reload:</p>
+<pre class="cmd">curl -X POST localhost:9091/-/reload</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>failed to reload config: couldn't load configuration (--config.file="/etc/prometheus/prometheus.yml"): parsing YAML file /etc/prometheus/prometheus.yml: yaml: unmarshal errors:
+  line 8: field scrape_intervall not found in type config.ScrapeConfig</pre>
+  </details>
+  <p>The good news: Prometheus refuses the new file and keeps running with the old one, so both targets stay up. The bad news: the broken file is now the one on disk. It is waiting for the next restart.</p>
+</li>
+
+<li>
+  <p><strong>Step on the landmine.</strong> Restart the Deployment, as anyone might do next week for an unrelated reason:</p>
+<pre class="cmd">kubectl -n plain rollout restart deploy/plain-prometheus</pre>
+<pre class="cmd">kubectl -n plain get pods</pre>
+  <details class="expect"><summary>Expected output after about 25 seconds (names shortened)</summary>
+<pre>NAME                       READY   STATUS             RESTARTS   AGE
+plain-prometheus-…-old     1/1     Running            0          6m
+plain-prometheus-…-new     0/1     CrashLoopBackOff   2          25s</pre>
+  </details>
+  <p>The new Pod reads the broken file at startup and exits; its status flips between <code>Error</code> and <code>CrashLoopBackOff</code>. The old Pod still serves, because the rolling update from <a href="s1-07-pod-deployment-service.html">session 1, lesson 07</a> only removes an old Pod once a new one is ready.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">[4]</a></sup> It saved you here. Without a Deployment, or after a node restart, your monitoring would simply be down.</p>
+</li>
+
+<li>
+  <p>Clean up part A. Stop the 9091 port-forward with <kbd>Ctrl</kbd>+<kbd>C</kbd>, then:</p>
+<pre class="cmd">kubectl delete namespace plain</pre>
+</li>
+</ol>
+
+<h2>Do it, part B: the operator way</h2>
+
+<ol class="steps">
+<li>
+  <p>Port-forward to the kps Prometheus in your second terminal, and keep it open:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090</pre>
+  <p>The operator writes its generated config into the Secret <code>prometheus-kps-prometheus</code>, gzipped. Define a small shell function to read it; you will use it many times. A new terminal forgets it, so run this line again there if needed.</p>
+<pre class="cmd">genconf() { kubectl -n monitoring get secret prometheus-kps-prometheus -o jsonpath='{.data.prometheus\.yaml\.gz}' | base64 -d | gunzip; }</pre>
+<pre class="cmd">genconf | grep '^- job_name'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>- job_name: serviceMonitor/monitoring/kps-alertmanager/0
+- job_name: serviceMonitor/monitoring/kps-alertmanager/1
+- job_name: serviceMonitor/monitoring/kps-apiserver/0
+- job_name: serviceMonitor/monitoring/kps-coredns/0
+- job_name: serviceMonitor/monitoring/kps-grafana/0
+- job_name: serviceMonitor/monitoring/kps-kubelet/0
+- job_name: serviceMonitor/monitoring/kps-kubelet/1
+- job_name: serviceMonitor/monitoring/kps-kubelet/2
+- job_name: serviceMonitor/monitoring/kps-operator/0
+- job_name: serviceMonitor/monitoring/kps-prometheus/0
+- job_name: serviceMonitor/monitoring/kps-prometheus/1</pre>
+  </details>
+  <p>Eleven jobs, one per ServiceMonitor endpoint. Nobody wrote this file by hand.</p>
+</li>
+
+<li>
+  <p><strong>Write a ServiceMonitor.</strong> Look at the podinfo Service first: the ServiceMonitor selects it by label and names its port.</p>
+<pre class="cmd">kubectl get svc demo-podinfo -o jsonpath='{.spec.ports[*].name} | {.metadata.labels.app\.kubernetes\.io/name}'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>http grpc | demo-podinfo</pre>
+  </details>
+  <p>Now type this one yourself, as a new file <code>monitoring/sm-first-try.yaml</code>. It is the obvious version, and it has a bug:</p>
+  <p class="filename">monitoring/sm-first-try.yaml</p>
+<pre class="file">apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: podinfo
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-podinfo
+  endpoints:
+    - port: http
+      path: /metrics</pre>
+<pre class="cmd">kubectl apply -f monitoring/sm-first-try.yaml</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>servicemonitor.monitoring.coreos.com/podinfo created</pre>
+  </details>
+  <p>Wait ten seconds, then look for it in the generated config:</p>
+<pre class="cmd">genconf | grep 'job_name: serviceMonitor/default'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>(no output)</pre>
+  </details>
+  <p>Empty. No error from <code>kubectl</code>, no error in the UI, nothing in the operator log. It is silently ignored.</p>
+</li>
+
+<li>
+  <p><strong>The gotcha.</strong> Remember the selector from lesson 03:</p>
+<pre class="cmd">kubectl -n monitoring get prometheus kps-prometheus -o jsonpath='{.spec.serviceMonitorSelector}'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>{"matchLabels":{"release":"kps"}}</pre>
+  </details>
+  <p>This Prometheus only reads ServiceMonitors labelled <code>release: kps</code>. Yours has no labels, so for this Prometheus it does not exist. It is the same rule as a Service selecting Pods, and the operator's own troubleshooting guide lists it as the first thing to check: are the ServiceMonitor's labels inside what the <code>Prometheus</code> object selects?<sup class="cite"><a href="https://prometheus-operator.dev/docs/platform/troubleshooting/">[5]</a></sup> It is the most common "my target never shows up" bug with this chart.</p>
+  <p>The fixed version is in the file you copied. The only difference is the label:</p>
+  <p class="filename">monitoring/servicemonitor-podinfo.yaml</p>
+<pre class="file">apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: podinfo
+  namespace: default
+  labels:
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-podinfo
+  endpoints:
+    - port: http
+      path: /metrics</pre>
+<pre class="cmd">kubectl apply -f monitoring/servicemonitor-podinfo.yaml</pre>
+<pre class="cmd">genconf | grep 'job_name: serviceMonitor/default'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>servicemonitor.monitoring.coreos.com/podinfo configured
+- job_name: serviceMonitor/default/podinfo/0</pre>
+  </details>
+  <p>In our run the new job was in the generated config <strong>2 seconds</strong> after the apply. The same name, <code>podinfo</code>, so <code>apply</code> updated the object instead of creating a second one. Delete the first-try file: <code>rm monitoring/sm-first-try.yaml</code>.</p>
+</li>
+
+<li>
+  <p>See the operator's side of it:</p>
+<pre class="cmd">kubectl -n monitoring logs deploy/kps-operator --tail=5</pre>
+  <details class="expect"><summary>Expected output (one of the lines; timestamps differ)</summary>
+<pre>ts=... level=info caller=/workspace/pkg/prometheus/server/operator.go:907 msg="sync prometheus" component=prometheus-controller key=monitoring/kps-prometheus</pre>
+  </details>
+  <p><code>sync prometheus</code> is one turn of the control loop: read all selected ServiceMonitors, render the config, write the Secret.</p>
+</li>
+
+<li>
+  <p><strong>Wait, and do nothing.</strong> Refresh <a href="http://localhost:9090">Status → Target health</a> every 15 seconds, or use the terminal:</p>
+<pre class="cmd">curl -s localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.labels.job=="demo-podinfo") | "\(.scrapePool) \(.health) \(.scrapeUrl)"'</pre>
+  <details class="expect"><summary>Expected output (your IP differs)</summary>
+<pre>serviceMonitor/default/podinfo/0 up http://10.244.0.8:9898/metrics</pre>
+  </details>
+  <p>You get one such line per podinfo Pod: with two replicas, a second line with the other Pod's IP.</p>
+  <p>In our run the target was up <strong>57 seconds</strong> after the apply. Why not 2 seconds? The Secret is mounted into the Prometheus Pod, so the same kubelet sync delay from part A applies. What is different: you did not <code>exec</code>, you did not <code>curl /-/reload</code>. The <code>config-reloader</code> sidecar noticed the new file and reloaded Prometheus for you.</p>
+  <p>And look at the addresses: <strong>Pod IPs, one target per Pod.</strong> The ServiceMonitor follows the Service's EndpointSlices, so Prometheus knows each Pod separately. Scale podinfo to three and a third target appears, with no edit anywhere.</p>
+</li>
+</ol>
+
+<h2>Do it, part C: switch the operator off</h2>
+
+<p>An operator is just a program in a Pod. What happens when it is not running? Lesson 02 predicted it: the desired state is stored, but nothing acts on it, until the loop comes back and compares again. That is <strong>level-triggered</strong>: the operator reacts to how things <em>are</em> when it looks, not to the events it missed.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/architecture/controller/">[6]</a></sup></p>
+
+<ol class="steps">
+<li>
+  <p>Start clean: delete the ServiceMonitor, then stop the operator.</p>
+<pre class="cmd">kubectl delete -f monitoring/servicemonitor-podinfo.yaml</pre>
+<pre class="cmd">kubectl -n monitoring scale deploy/kps-operator --replicas=0</pre>
+<pre class="cmd">kubectl -n monitoring get deploy kps-operator</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/kps-operator scaled
+NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+kps-operator   0/0     0            0           113s</pre>
+  </details>
+</li>
+
+<li>
+  <p>Apply the ServiceMonitor again, with the right label this time.</p>
+<pre class="cmd">kubectl apply -f monitoring/servicemonitor-podinfo.yaml</pre>
+<pre class="cmd">kubectl get servicemonitor podinfo</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>servicemonitor.monitoring.coreos.com/podinfo created
+NAME      AGE
+podinfo   0s</pre>
+  </details>
+  <p>The object exists. The API server stored it, as it stores any object. Wait 30 seconds and check the generated config:</p>
+<pre class="cmd">genconf | grep 'job_name: serviceMonitor/default'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>(no output)</pre>
+  </details>
+  <p>Empty. Your ServiceMonitor is correct and stored, and nothing happens, because nobody is watching it. The CRD gave the API a new noun. Only the operator gives it a meaning.</p>
+</li>
+
+<li>
+  <p>Switch the operator back on.</p>
+<pre class="cmd">kubectl -n monitoring scale deploy/kps-operator --replicas=1</pre>
+<pre class="cmd">kubectl -n monitoring rollout status deploy/kps-operator</pre>
+<pre class="cmd">genconf | grep 'job_name: serviceMonitor/default'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>deployment.apps/kps-operator scaled
+deployment "kps-operator" successfully rolled out
+- job_name: serviceMonitor/default/podinfo/0</pre>
+  </details>
+  <p>Within seconds of starting, the operator caught up. It never saw the "ServiceMonitor created" event; it was not running. It did not need to. On start it compared what <em>is</em> with what <em>should be</em>, and fixed the difference. Level-triggered, in action.</p>
+</li>
+
+<li>
+  <p><strong>Drift, part 1.</strong> Delete the generated config:</p>
+<pre class="cmd">kubectl -n monitoring delete secret prometheus-kps-prometheus</pre>
+<pre class="cmd">kubectl -n monitoring get secret prometheus-kps-prometheus</pre>
+  <p>It is back, with an <code>AGE</code> of a second or two. In our run it was recreated after 1 second. Any hand edit to that Secret meets the same fate: the next sync overwrites it from the CRs.</p>
+</li>
+
+<li>
+  <p><strong>Drift, part 2.</strong> Scale the Prometheus StatefulSet itself to zero, as if someone "temporarily" turned it off:</p>
+<pre class="cmd">kubectl -n monitoring scale statefulset prometheus-kps-prometheus --replicas=0</pre>
+<pre class="cmd">kubectl -n monitoring get statefulset prometheus-kps-prometheus</pre>
+  <details class="expect"><summary>Expected output, about 5 seconds later</summary>
+<pre>NAME                        READY   AGE
+prometheus-kps-prometheus   0/1     ...</pre>
+  </details>
+  <p><code>0/1</code>: the operator has already set the desired count back to 1, because the <code>Prometheus</code> CR says one replica. A few seconds later it is <code>1/1</code> again. The source of truth is the CR, not the StatefulSet.</p>
+  <p class="warn">This restarted Prometheus, so your 9090 port-forward died with the old Pod. Stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd> and run it again.</p>
+</li>
+
+<li>
+  <p>Keep <code>monitoring/servicemonitor-podinfo.yaml</code> and commit it with the copied files. Leave the stack and podinfo running; the next lesson builds on them.</p>
+<pre class="cmd">git add monitoring/</pre>
+<pre class="cmd">git commit -m "Scrape podinfo with a ServiceMonitor"</pre>
+</li>
+</ol>
+
+<h2>The comparison</h2>
+
+<p>You have now done the same job both ways. Here it is side by side:</p>
+
+<table>
+  <thead><tr><th></th><th>Config file (traditional)</th><th>Operator (ServiceMonitor)</th></tr></thead>
+  <tbody>
+    <tr><td>Who writes the scrape config</td><td>You, by hand, in one shared file</td><td>The operator, generated from many small CRs</td></tr>
+    <tr><td>Ownership</td><td>One file that every team edits: merge conflicts, one owner</td><td>Each team ships its own ServiceMonitor next to its Deployment</td></tr>
+    <tr><td>Targets</td><td>Static <code>host:port</code>, here a Service: one target for two Pods</td><td>Label selector on Services, follows the Pods: one target per Pod</td></tr>
+    <tr><td>Validation</td><td>None at <code>apply</code>. A typo shows up at reload, or at the next restart</td><td>The API server checks the CR against its schema at <code>apply</code></td></tr>
+    <tr><td>Reload</td><td>You trigger it, and must not forget</td><td>The config-reloader sidecar does it</td></tr>
+    <tr><td>Lifecycle</td><td>App deleted, its job stays in the file until someone removes it</td><td>Delete the ServiceMonitor, the job disappears</td></tr>
+    <tr><td>Drift</td><td>A hand edit stays until someone notices</td><td>The operator puts it back to match the CR</td></tr>
+    <tr><td>Cost</td><td>Nothing extra running</td><td>One more program that must be running, and can fail</td></tr>
+    <tr><td>Debugging</td><td>Read the one file</td><td>Read the CR, then the operator log, then the generated config</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Honest about speed.</strong> The operator did not make the target appear much faster: 57 seconds against about 61 plus your reload. Both wait for the kubelet to sync a mounted volume. Speed is not the win. The win is everything around it: no manual reload to forget, a schema that rejects some mistakes at <code>apply</code>, a ServiceMonitor each team owns, targets that follow Pods, and a loop that heals drift.</p>
+
+<p><strong>Honest about cost.</strong> An operator moves the work from "edit a file" to "trust a program". You saw what that means in part C: when the program is off, correct objects silently do nothing. In part B you saw the other face of it: a ServiceMonitor with the wrong label also silently does nothing. Debugging has one more layer: the CR, then the operator's log, then the generated config. That is the price. For a stack that many teams change every week, it is usually worth paying. For one small app with one config file that never changes, it may not be.</p>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>Plain Prometheus. You edit the ConfigMap, <code>kubectl apply</code> it, and wait two full minutes. You do nothing else. Is the new target in Target health?</legend>
+  <button class="opt" data-why="No. The file did sync after about a minute, but Prometheus never read it again.">Yes, the kubelet synced the file within the two minutes</button>
+  <button class="opt" data-why="Right. The file changed, but Prometheus does not watch it. Nobody sent /-/reload.">No, the file changed, but Prometheus never reloaded it again</button>
+  <button class="opt" data-why="No. The kubelet does update mounted ConfigMaps, after its sync delay. It did here, after 61 s.">No, mounted ConfigMaps never change while the Pod is running</button>
+  <button class="opt" data-why="No. A ConfigMap change does not touch the Pod template, so nothing restarts.">Yes, the Deployment restarted the Pod with the new file</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>You add <code>scrape_intervall: 15s</code> (typo) to the ConfigMap and run <code>kubectl apply</code>. What does it print?</legend>
+  <button class="opt" data-why="No. Kubernetes never parses prometheus.yml. It only sees one string value.">An error that names the unknown field scrape_intervall</button>
+  <button class="opt" data-why="No. The apply itself does not fail. It changes the ConfigMap like any other edit.">A warning, and the ConfigMap is left unchanged</button>
+  <button class="opt" data-why="No. A ConfigMap edit does not restart anything, so there is no CrashLoopBackOff yet.">The running Pod goes straight into CrashLoopBackOff instead</button>
+  <button class="opt" data-why="Right. To Kubernetes the file is just a string. The typo waits for the reload or restart.">configmap/plain-prometheus configured, with no complaint of any kind</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>With that typo synced into the file, you <code>POST /-/reload</code>. What is Prometheus scraping a minute later?</legend>
+  <button class="opt" data-why="Right. The reload fails with the unmarshal error, and the old config stays in force.">The same targets as before, from the old config</button>
+  <button class="opt" data-why="No. A broken file is never applied. Prometheus refuses it as a whole.">Every job except the one that has the typo</button>
+  <button class="opt" data-why="No. A failed reload does not stop the running server. Only a restart would crash it.">Nothing, because Prometheus crashed during the failed config reload</button>
+  <button class="opt" data-why="No. Prometheus does not guess. An unknown field makes the whole file invalid.">All the jobs, with the typo field quietly ignored</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You apply a ServiceMonitor for podinfo that has no <code>release: kps</code> label. What happens?</legend>
+  <button class="opt" data-why="No. Labels are optional for the API server. The schema check passes.">kubectl apply fails with a missing label error</button>
+  <button class="opt" data-why="No. The operator never selects it, so it writes nothing and reports nothing about it.">The operator logs an error, marks it invalid</button>
+  <button class="opt" data-why="Right. It is created, but serviceMonitorSelector does not match it. Silence.">It is created, but Prometheus never scrapes it</button>
+  <button class="opt" data-why="No. serviceMonitorSelector only matches release: kps. Without it, no target.">It is created, and the target appears normally</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>The operator is scaled to 0. You apply a correct ServiceMonitor. Where does it exist 30 seconds later?</legend>
+  <button class="opt" data-why="No. The generated config only changes when the operator runs. It is not running.">In the API and in the generated config</button>
+  <button class="opt" data-why="Right. The API server stores it. Nothing turns it into config until the operator returns.">In the API only; the config is unchanged</button>
+  <button class="opt" data-why="No. The API server stores any valid object. It does not need the operator to accept it.">Nowhere, because the API server rejected the object</button>
+  <button class="opt" data-why="No. Nothing else writes Prometheus config here. The reloader only reloads what exists.">In the config, written there by the config-reloader</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>The operator is running. You delete the Secret <code>prometheus-kps-prometheus</code>. What does <code>kubectl -n monitoring get secret prometheus-kps-prometheus</code> show a few seconds later?</legend>
+  <button class="opt" data-why="No. The operator owns that Secret and recreates it from the CRs.">NotFound, until you run helm upgrade once again</button>
+  <button class="opt" data-why="No. Helm never made this Secret. The operator did, at run time.">The Secret, restored by Helm from its history</button>
+  <button class="opt" data-why="No. The operator rebuilds it from all selected ServiceMonitors, not an empty file.">An empty Secret that Prometheus refuses to load</button>
+  <button class="opt" data-why="Right. Level-triggered: the Secret should exist, so the operator recreated it in about a second.">A fresh Secret, rebuilt by the operator itself</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Plain Prometheus scrapes <code>demo-podinfo.default.svc:9898</code>, and podinfo has two Pods. How many podinfo targets does Prometheus see?</legend>
+  <button class="opt" data-why="Right. A static Service address is one target. The Service picks a Pod for each scrape.">One, because the Service hides the Pods behind it</button>
+  <button class="opt" data-why="No. A static target is never expanded. That is what ServiceMonitors do.">Two, because Prometheus resolves the Service to Pod IPs</button>
+  <button class="opt" data-why="No. The Service answers, so the target is up. It is just one target.">Zero, because Services cannot be scraped by Prometheus directly</button>
+  <button class="opt" data-why="No. Prometheus has no idea how many Pods there are behind the address.">Two, because each replica registers itself with Prometheus separately</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>Which row of the comparison table is a real downside of the operator way?</legend>
+  <button class="opt" data-why="No. The operator heals drift. That is an advantage.">Drift: hand edits are put back to spec</button>
+  <button class="opt" data-why="No. Schema checks at apply catch mistakes earlier. That is an advantage.">Validation: the API checks the CR at apply</button>
+  <button class="opt" data-why="Right. The operator must be running, can fail, and adds a debugging layer.">Cost: one more program that must keep running</button>
+  <button class="opt" data-why="No. Each team owning its own ServiceMonitor avoids one shared file. An advantage.">Ownership: each team ships its very own ServiceMonitor</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://prometheus-operator.dev/docs/developer/getting-started/">Prometheus Operator: Getting Started</a>. It deploys a sample app with three replicas, a Service and a ServiceMonitor, and shows how a <code>Prometheus</code> object's <code>serviceMonitorSelector</code> picks it up: exactly the chain you debugged today, written from scratch. About ten minutes with the YAML.
+</div>
+
+<p class="ask">A target that never shows up? Before you ask your instructor, run the three layers: <code>kubectl get servicemonitor -A --show-labels</code>, <code>kubectl -n monitoring logs deploy/kps-operator --tail=20</code>, and <code>genconf | grep job_name</code>. Bring the output.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://prometheus.io/docs/prometheus/latest/configuration/configuration/">Prometheus: Configuration</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">Kubernetes: ConfigMaps, mounted ConfigMaps are updated automatically</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">Kubernetes: Operator pattern</a> ·
+[4] <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment">Kubernetes: Updating a Deployment</a> ·
+[5] <a href="https://prometheus-operator.dev/docs/platform/troubleshooting/">Prometheus Operator: Troubleshooting</a> ·
+[6] <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes: Controllers</a>.
+Commands verified 2026-11-19 on kind v0.33.0, kubectl 1.37.1, Helm v4.3.0, kube-prometheus-stack 93.4.1 (macOS).</p>
+
+<nav class="pager"><a href="s3-03-kube-prometheus-stack.html">← previous: kube-prometheus-stack</a><a href="s3-05-instrument-and-alert.html">next: instrument and alert →</a></nav>
+
+</main>
+</body>
+</html>

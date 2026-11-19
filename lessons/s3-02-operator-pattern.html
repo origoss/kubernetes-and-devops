@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The operator pattern</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Operators · about 20 minutes · read before the session</p>
+<h1>The operator pattern: new nouns and a loop that never stops</h1>
+
+<div class="win">
+  <strong>Your win:</strong> you can explain, in one sentence, why an operator keeps working even when it misses an event. You can tell a CRD from a CR, and you know which part of the cluster acts on each.
+</div>
+
+<p class="meta">Before this: <a href="s3-01-helm-consumer.html">Helm as a consumer</a>, and the self-healing step of <a href="s1-07-pod-deployment-service.html">lesson 07</a>, where you deleted a Pod and watched a new one appear. Your kind cluster runs.</p>
+
+<h2>What a Deployment cannot do</h2>
+
+<p>A Deployment keeps N copies of a Pod running. That is all it knows. It does not know that your database has a primary and two replicas, and that when the primary dies one replica must be promoted, and the others told to follow it. It does not know that a certificate expires on Friday and must be renewed first. It does not know that a new Service just appeared and your monitoring should start watching it.</p>
+
+<p>Today a person knows these things. "Human operators who look after specific applications and services have deep knowledge of how the system ought to behave, how to deploy it, and how to react if there are problems."<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">[1]</a></sup> First that knowledge lives in their head, then in a runbook: "when X happens, do Y". An <strong>operator</strong> is that runbook turned into a program that runs in the cluster, all day.</p>
+
+<p>The official definition: "Operators are software extensions to Kubernetes that make use of custom resources to manage applications and their components. Operators follow Kubernetes principles, notably the control loop."<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">[1]</a></sup> Two ideas in that sentence: <em>custom resources</em> and <em>the control loop</em>. You already know half of each.</p>
+
+<h2>You already met a controller</h2>
+
+<p>In lesson 07 you deleted a <code>hello</code> Pod, and a new one was <code>Pending</code> in the same second. Nobody called the ReplicaSet controller. It watched, counted the Pods that matched its selector, saw one where it wanted two, and made one. "Controllers are control loops that watch the state of your cluster, then make or request changes where needed."<sup class="cite"><a href="https://kubernetes.io/docs/concepts/architecture/controller/">[2]</a></sup></p>
+
+<p>An operator is the same kind of loop, with two differences. It runs as an ordinary Pod that someone installed, not inside the control plane. And it looks after <em>new nouns</em>: not Pods and ReplicaSets, but things like "a Prometheus server" or "a database cluster".</p>
+
+<h2>New nouns: CRD and CR</h2>
+
+<p>The Kubernetes API has a fixed set of nouns: Pod, Service, Deployment, ConfigMap, and a few dozen more. A <strong>CustomResourceDefinition</strong> (CRD) adds a new one. "When you create a new CustomResourceDefinition (CRD), the Kubernetes API Server creates a new RESTful resource path".<sup class="cite"><a href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/">[3]</a></sup> From then on, <code>kubectl get</code>, <code>apply</code> and <code>delete</code> work on the new noun like on any built-in one.</p>
+
+<p>A <strong>custom resource</strong> (CR) is one object of that new noun.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/">[4]</a></sup> Remember <a href="s1-01-why-containers.html">lesson 01</a>: an image is the class, a container is an object. Here it is the same:</p>
+
+<table>
+  <thead><tr><th></th><th>Defines</th><th>Example from the session</th></tr></thead>
+  <tbody>
+    <tr><td><strong>CRD</strong></td><td>a new <em>kind</em>: its name and the schema of its fields (the class)</td><td><code>servicemonitors.monitoring.coreos.com</code></td></tr>
+    <tr><td><strong>CR</strong></td><td>one object of that kind, with your values (the object)</td><td>a ServiceMonitor named <code>podinfo</code>: "scrape the podinfo Service"</td></tr>
+  </tbody>
+</table>
+
+<p>The CRD carries a schema, so the API server checks every CR you apply against it, and <code>kubectl explain</code> can describe its fields.<sup class="cite"><a href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/">[3]</a></sup> But a CRD alone does <strong>nothing</strong>. The API server stores your CR in etcd, and that is all. Something has to read it and act. That something is the operator. "When you combine a custom resource with a custom controller, custom resources provide a true declarative API."<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/">[4]</a></sup></p>
+
+<h2>The control loop</h2>
+
+<pre>   you ──kubectl apply──►  CR: the desired state, stored by the API server
+                                │
+                                │ watch
+                                ▼
+                          ┌────────────┐   act    ┌─────────────────────┐
+             ┌──────────► │  operator  │ ───────► │  the real things:   │
+             │            │  (a Pod)   │          │  Pods, config,      │
+             │            └────────────┘ ◄─────── │  Secrets, ...       │
+             │                  │       observe   └─────────────────────┘
+             └──── repeat ──────┘
+               1 observe   what is actually there?
+               2 diff      desired (the CR) vs actual
+               3 act       close the gap, nothing more
+               4 repeat    on every change, often on a timer too</pre>
+
+<p>This is the thermostat from <a href="s1-05-why-orchestration.html">lesson 05</a>: you set the desired temperature, it measures the actual one, and it switches the heating to close the gap.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/architecture/controller/">[2]</a></sup> It never finishes. The loop runs for as long as the operator runs.</p>
+
+<h3>Level-triggered, not edge-triggered</h3>
+
+<p>There are two ways to build such a loop.</p>
+<ul>
+  <li><strong>Edge-triggered</strong>: react to each <em>change</em>. "A ServiceMonitor was added, so add one scrape job." Like a doorbell: if you are in the shower when it rings, you never learn someone came.</li>
+  <li><strong>Level-triggered</strong>: react to the <em>state</em>. "Here are all ServiceMonitors that exist now; here is the config that exists now; make the config match." Like checking the mailbox: whatever arrived while you were away is still in there.</li>
+</ul>
+
+<p>Kubernetes controllers, operators included, are level-triggered. Change events only <em>wake them up</em>; what they act on is the whole desired state and the whole actual state. Learn this sentence:</p>
+
+<div class="win">
+  <strong>Remember:</strong> an operator that misses an event still converges on the next pass, because it compares whole states, not events.
+</div>
+
+<p>That is why an operator can crash, restart or be switched off for an hour and still catch up. "Controllers can fail, so Kubernetes is designed to allow for that."<sup class="cite"><a href="https://kubernetes.io/docs/concepts/architecture/controller/">[2]</a></sup> It also means hand edits do not stick: if you change something the operator owns, the next pass sees a gap and puts it back.</p>
+
+<p>One more property follows. The loop will run the "act" step many times on the same state, so the step must be <strong>idempotent</strong>: running it twice has the same effect as running it once. "Make sure the config contains job X" is idempotent. "Append job X to the config" is not; after ten passes you have ten copies. You have seen this already: <code>kubectl apply</code> and <code>helm upgrade --install</code> are idempotent too.</p>
+
+<h2>Coming up in the session</h2>
+
+<p>In the session you install kube-prometheus-stack with Helm. It brings the <strong>Prometheus Operator</strong> and ten CRDs, among them <code>Prometheus</code> and <code>ServiceMonitor</code>. You write a ServiceMonitor, and the operator turns it into Prometheus configuration for you. Then you <strong>switch the operator off</strong>, apply another ServiceMonitor, and watch nothing happen: the CR is stored, and nobody acts on it. Switch it back on, and it catches up. That is the sentence above, live.</p>
+
+<p class="note">This course only <em>uses</em> operators. Writing one is a course of its own: you would use a framework such as kubebuilder or the Operator SDK, usually in Go. The Kubernetes page on the operator pattern lists kubebuilder and other such tools.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">[1]</a></sup></p>
+
+<h2>Do it</h2>
+
+<p>Three short looks at the API of your own kind cluster.</p>
+
+<ol class="steps">
+<li>
+  <p>List the custom nouns your cluster knows.</p>
+<pre class="cmd">kubectl get crd</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>No resources found</pre>
+  </details>
+  <p>None. A fresh kind cluster has only built-in nouns, and podinfo from the last lesson brought no CRDs. After the install in the session, this command lists ten, all ending in <code>monitoring.coreos.com</code>.</p>
+</li>
+
+<li>
+  <p>List the built-in nouns. Every row is a kind of object you can <code>get</code>, <code>apply</code> and <code>delete</code>.</p>
+<pre class="cmd">kubectl api-resources | head</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME                                SHORTNAMES   APIVERSION                        NAMESPACED   KIND
+bindings                                         v1                                true         Binding
+componentstatuses                   cs           v1                                false        ComponentStatus
+configmaps                          cm           v1                                true         ConfigMap
+endpoints                           ep           v1                                true         Endpoints
+events                              ev           v1                                true         Event
+limitranges                         limits       v1                                true         LimitRange
+namespaces                          ns           v1                                false        Namespace
+nodes                               no           v1                                false        Node
+persistentvolumeclaims              pvc          v1                                true         PersistentVolumeClaim</pre>
+  </details>
+  <p>Run it without <code>| head</code> to see them all, and find <code>deployments</code> (group <code>apps/v1</code>). The short names explain <code>kubectl get cm</code> and <code>kubectl get svc</code>. After the session, the new kinds show up in this same list.</p>
+</li>
+
+<li>
+  <p>Ask the API to explain one field. This works because every kind has a schema.</p>
+<pre class="cmd">kubectl explain deployment.spec.replicas</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>GROUP:      apps
+KIND:       Deployment
+VERSION:    v1
+
+FIELD: replicas &lt;integer&gt;
+
+
+DESCRIPTION:
+    Number of desired pods. This is a pointer to distinguish between explicit
+    zero and not specified. Defaults to 1.</pre>
+  </details>
+  <p>"Number of <em>desired</em> pods": the field is desired state, and a controller makes it real. A CRD carries a schema of the same kind, so in the session <code>kubectl explain servicemonitor.spec</code> works just the same.</p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>Which pair matches the relation between a CRD and a CR?</legend>
+  <button class="opt" data-why="No. Neither of them runs. Both are just stored data; the operator is what runs.">Container and image: the CRD runs, the CR is the template</button>
+  <button class="opt" data-why="No. A CRD is not a Pod and manages nothing. It only defines a new kind of object.">Pod and Deployment: the CRD is a Pod the CR manages</button>
+  <button class="opt" data-why="Right. The CRD defines a new kind with its schema; each CR is one object of that kind, like a container from an image.">Class and object: CRD defines a new noun, CR is one</button>
+  <button class="opt" data-why="No. They are different things: the definition of a kind, and one object of that kind.">Same thing: CR is just the short name for a CRD</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>The operator's Deployment is scaled to 0 replicas. You <code>kubectl apply</code> a valid CR. What happens?</legend>
+  <button class="opt" data-why="Right. The API server validates and stores it, so kubectl get shows it. Nothing acts on it until the operator runs again.">It is stored and listed, but nothing acts on it yet</button>
+  <button class="opt" data-why="No. The API server accepts any CR that matches the CRD's schema. It does not ask the operator.">kubectl apply fails, because no operator is there to accept it</button>
+  <button class="opt" data-why="No. The API server only stores and validates. Acting on a CR is the operator's job alone.">The API server does the operator's work itself in the meantime</button>
+  <button class="opt" data-why="No. A stored object stays until someone deletes it. The operator finds it whenever it starts again.">It is queued, then dropped if no operator returns in time</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>An operator is down for ten minutes. Meanwhile three CRs are created, one is edited and one is deleted. It starts again. What does it do?</legend>
+  <button class="opt" data-why="No. That is the edge-triggered failure. A level-triggered operator does not need the events.">Nothing for those changes, because it never saw their events</button>
+  <button class="opt" data-why="No. It does not replay history. It reads the current state, which already includes all five changes.">It replays the five missed events in their original order</button>
+  <button class="opt" data-why="No. The CRs are stored in the API. The operator reads them itself; you re-apply nothing.">It waits until you re-apply each object it has missed</button>
+  <button class="opt" data-why="Right. Level-triggered: it reads all CRs that exist now and the real state, then closes the gap. It converges on the next pass.">It compares desired and actual state and closes every gap</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>Someone edits, by hand, a config Secret that an operator generated from a CR. The operator is running. What happens next?</legend>
+  <button class="opt" data-why="No. The operator compares the whole actual state with the CR, not only CR changes. The edit shows up as a gap.">The hand edit stays, because the operator only reacts to CRs</button>
+  <button class="opt" data-why="Right. On its next pass it sees that actual differs from desired, and overwrites the edit. The CR is the source of truth.">The operator sees the gap and puts it back to spec</button>
+  <button class="opt" data-why="No. The desired state lives in the CR, and the operator never rewrites it from what it finds.">The operator copies the hand edit back into the CR's spec</button>
+  <button class="opt" data-why="No. The API server accepts the edit if you have permission. Nothing is locked; it is just undone.">The API server rejects the edit, since operators lock their objects</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why must the "act" step of the loop be idempotent?</legend>
+  <button class="opt" data-why="Right. The loop runs again and again on the same state. Twice must equal once, or every pass adds another copy.">The loop repeats it, so running it twice must change nothing</button>
+  <button class="opt" data-why="No. Idempotent is about the effect of repeating, not about speed.">Idempotent code runs faster, and the loop must be very quick</button>
+  <button class="opt" data-why="No. The API server has no such check. Idempotence is the operator author's job.">The API server refuses any request that is not marked idempotent</button>
+  <button class="opt" data-why="No. A level-triggered loop handles the same state many times, on purpose.">It is not required; each event is handled exactly once anyway</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span>You run <code>kubectl get crd</code> on a fresh kind cluster. What do you see?</legend>
+  <button class="opt" data-why="No. Those come with the Prometheus Operator, which you install in the session.">The ten monitoring.coreos.com CRDs that every cluster ships</button>
+  <button class="opt" data-why="No. Built-in kinds are not CRDs. They show up in kubectl api-resources instead.">deployments, pods and services, the built-in resource definitions</button>
+  <button class="opt" data-why="Right. A fresh cluster has only built-in kinds. CRDs appear when something installs them.">No resources found: nothing has installed one yet</button>
+  <button class="opt" data-why="No. Every Kubernetes cluster, kind included, supports CRDs.">An error, because kind does not support CRDs</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Which job needs an operator, and not just a Deployment?</legend>
+  <button class="opt" data-why="No. That is exactly what a Deployment does well.">Keeping three copies of a stateless web server running</button>
+  <button class="opt" data-why="No. The ReplicaSet behind a Deployment already does this.">Replacing a Pod quickly after its node has died</button>
+  <button class="opt" data-why="No. A Deployment's rolling update does this, as you saw in lesson 07.">Rolling out a new image version, Pod by Pod</button>
+  <button class="opt" data-why="Right. That needs knowledge of the database itself: which replica, how to promote it, who must follow. That is runbook knowledge.">Promoting a database replica when the old primary fails</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>In the session, <code>kubectl explain servicemonitor.spec</code> works. Why?</legend>
+  <button class="opt" data-why="No. kubectl asks your cluster's API server, not the internet.">kubectl downloads the docs for every noun from the internet</button>
+  <button class="opt" data-why="Right. The CRD's schema is published by the API server, and kubectl explain reads it, as for built-in kinds.">The CRD carries a schema that the API server publishes</button>
+  <button class="opt" data-why="No. kubectl talks only to the API server. The operator is not involved.">The operator Pod answers every kubectl explain request by itself</button>
+  <button class="opt" data-why="No. kubectl knows no operators. It learns new kinds from the cluster.">kubectl has the schema of every popular operator built in</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">Kubernetes: Operator pattern</a>. It is short: the motivation, an example operator step by step, and the list of tools to write your own. About ten minutes. If you want the API side, continue with <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/">Custom Resources</a>.
+</div>
+
+<p class="ask">Not sure you can say the sentence in your own words? Bring it to the session and ask. It is the idea the whole session builds on.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/operator/">Kubernetes: Operator pattern</a> ·
+[2] <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes: Controllers</a> ·
+[3] <a href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/">Kubernetes: Extend the Kubernetes API with CustomResourceDefinitions</a> ·
+[4] <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/">Kubernetes: Custom Resources</a>.
+Commands verified 2026-11-19 on kind v0.33.0, kubectl 1.37.1, Helm v4.3.0 (macOS).</p>
+
+<nav class="pager"><a href="s3-01-helm-consumer.html">← previous: Helm as a consumer</a><a href="s3-03-kube-prometheus-stack.html">next: kube-prometheus-stack →</a></nav>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logs with Loki and Alloy</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Observability · about 30 minutes · after the session</p>
+<h1>Logs: from a spike to the lines behind it</h1>
+
+<div class="win">
+  <strong>Your win:</strong> from an error-rate spike to the exact log lines behind it, in one Grafana window. Your <code>hello</code> server writes JSON logs, Alloy ships every Pod's output to Loki, and you query it with LogQL next to your Prometheus panel.
+</div>
+
+<p class="meta">Before this: <a href="s3-05-instrument-and-alert.html">lesson 05</a>. Your kind cluster runs kube-prometheus-stack (release <code>kps</code>, namespace <code>monitoring</code>) from your <code>values-kps.yaml</code>, and <code>hello:0.2.0</code> runs with its ServiceMonitor and PrometheusRule from <code>k8s/</code>. You work in your own <code>hello</code> repository, where <code>monitoring/values-kps.yaml</code> lives since <a href="s3-03-kube-prometheus-stack.html">lesson 03</a>. Run <code>git pull</code> in the course repository first: this lesson copies two more files from its <code>examples/s3/</code>.</p>
+
+<h2>Why logs need a system</h2>
+
+<p>Metrics told you <em>that</em> something is wrong: the error ratio went up. The <em>why</em> is usually in a log line. So far you read those with <code>kubectl logs</code>. It has three limits:</p>
+
+<ul>
+  <li><strong>It dies with the Pod.</strong> The kubelet keeps the log of one previous container run, that is all. Delete or evict the Pod and its logs are gone.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/cluster-administration/logging/">[1]</a></sup> A rollout replaces every Pod, so a rollout deletes your evidence.</li>
+  <li><strong>One container at a time.</strong> <code>kubectl logs deploy/hello</code> picks one Pod and prints <code>Found 2 pods, using pod/…</code>. The other Pod's lines are not there.</li>
+  <li><strong>No "yesterday".</strong> You cannot ask "show me every error from all Pods between 14:02 and 14:05".</li>
+</ul>
+
+<p>Kubernetes says it plainly: logs need "a separate storage and lifecycle independent of nodes, pods, or containers", and Kubernetes itself does not provide that storage.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/cluster-administration/logging/">[1]</a></sup> The usual answer is a <strong>node agent</strong>: one collector per node, run as a DaemonSet, that picks up every container's output and pushes it to a log store. In this lesson the agent is <strong>Alloy</strong> and the store is <strong>Loki</strong>.</p>
+
+<h2>Structured logs: one JSON object per line</h2>
+
+<p>Your server prints <code>listening on :8080</code> and nothing else. A useful log line answers questions: which request, what status, how bad. Write it as <strong>JSON</strong>, one object per line, and a machine can filter on any field later.</p>
+
+<p>Go has this built in. The <code>log/slog</code> package's <code>JSONHandler</code> "writes Records to an io.Writer as line-delimited JSON objects".<sup class="cite"><a href="https://pkg.go.dev/log/slog">[2]</a></sup> You set it as the default logger once, then log one line per request from the middleware you wrote in lesson 05: <code>INFO</code> for normal requests, <code>ERROR</code> when the status is 500 or above.</p>
+
+<p class="note">Write the line to <strong>stdout</strong>. The container runtime saves stdout and stderr; the node agent picks them up from there. Your program never needs to know where its logs end up.</p>
+
+<h2>Three parts</h2>
+
+<table>
+  <thead><tr><th>Part</th><th>Runs as</th><th>Job</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Loki</strong></td><td>StatefulSet <code>loki</code>, one Pod, single-binary mode, logs on a filesystem volume</td><td>Stores log lines and answers queries. It indexes only the <strong>labels</strong> of each stream, not the text of the lines.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/get-started/overview/">[3]</a></sup></td></tr>
+    <tr><td><strong>Alloy</strong></td><td>DaemonSet <code>alloy</code>: one Pod per node</td><td>Asks the Kubernetes API which Pods run on its node, gives their logs labels (namespace, pod, container, app), tails them, pushes them to Loki.</td></tr>
+    <tr><td><strong>Grafana</strong></td><td>already there, from <code>kps</code></td><td>Gets one more data source, Loki. Then Explore speaks LogQL next to PromQL.</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Why "labels only" makes Loki cheap.</strong> A search engine indexes every word of every line, and that index can grow bigger than the logs. Loki does not. A <strong>stream</strong> is all lines with the same set of labels, for example <code>{namespace="default", app="hello", pod="hello-9c5c5cb84-tmknd", container="hello"}</code>. Loki indexes those label sets, and stores the lines themselves as compressed chunks. "A small index and highly compressed chunks simplify the operation and significantly lower the cost of Loki."<sup class="cite"><a href="https://grafana.com/docs/loki/latest/get-started/overview/">[3]</a></sup> The price: searching for text inside lines means reading those chunks. So you always narrow down by labels first.</p>
+
+<h2>The pipeline</h2>
+
+<pre>container stdout
+      │  (the kubelet serves it through the Kubernetes API)
+      ▼
+┌───────────── Alloy Pod (DaemonSet, one per node) ──────────────┐
+│ discovery.kubernetes   "which Pods run on my node?"            │
+│        ▼  targets                                              │
+│ discovery.relabel      "label them: namespace, pod, app, ..."  │
+│        ▼  output                                               │
+│ loki.source.kubernetes "tail their logs"                       │
+│        ▼  forward_to                                           │
+│ loki.write             "push to Loki"                          │
+└────────────────────────────────────────────────────────────────┘
+      │  HTTP push to loki.monitoring:3100
+      ▼
+Loki (StatefulSet) ──► Grafana Explore (LogQL)</pre>
+
+<p>Alloy's configuration is its own small language. You declare <strong>components</strong>, each with a type and a name, and wire them by name: one component reads another's export as <code>type.name.export</code>, for example <code>discovery.kubernetes.pods.targets</code>.<sup class="cite"><a href="https://grafana.com/docs/alloy/latest/get-started/components/">[4]</a></sup> Read the config in <code>examples/s3/values-alloy.yaml</code> top to bottom, following the names:</p>
+
+<div class="filename">examples/s3/values-alloy.yaml</div>
+<pre class="file"># Alloy as a DaemonSet: one collector per node, shipping Pod logs to Loki.
+controller:
+  type: daemonset
+alloy:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  configMap:
+    content: |
+      // 1. Find the Pods on this node through the Kubernetes API.
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("HOSTNAME")
+        }
+      }
+
+      // 2. Turn Kubernetes metadata into a few Loki labels.
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+        }
+      }
+
+      // 3. Tail those Pods' logs.
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      // 4. Push to Loki.
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring:3100/loki/api/v1/push"
+        }
+      }</pre>
+
+<ol>
+  <li><code>discovery.kubernetes "pods"</code> lists Pods from the API. The <code>selectors</code> block narrows the list with a field selector: only Pods whose <code>spec.nodeName</code> equals this Alloy Pod's <code>HOSTNAME</code>. The Alloy chart sets <code>HOSTNAME</code> to the node's name, so each Alloy takes only its own node's Pods. With three nodes, three Alloys share the work and no line is shipped twice. Grafana's docs show the same selector and say it "significantly" cuts API server load.<sup class="cite"><a href="https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.kubernetes/">[5]</a></sup></li>
+  <li><code>discovery.relabel "pods"</code> takes those <code>targets</code> and copies four pieces of metadata into labels. The last rule copies the Pod's <code>app</code> label, which your <code>hello</code> Pods carry. A Pod without an <code>app</code> label simply gets no <code>app</code> label in Loki.</li>
+  <li><code>loki.source.kubernetes "pods"</code> tails the logs of those Pods "using the Kubernetes API", without reading files on the node's disk.<sup class="cite"><a href="https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/">[6]</a></sup> It hands every line to <code>forward_to</code>.</li>
+  <li><code>loki.write "default"</code> pushes to the Loki Service in namespace <code>monitoring</code>. Its <code>receiver</code> export is what step 3 points at.</li>
+</ol>
+
+<p class="note">Labels starting with <code>__meta_</code> are the same discovery metadata Prometheus uses for scrape targets. Relabelling is the same idea too: copy what you need into real labels, the rest is dropped.</p>
+
+<h2>Loki on a laptop: single binary</h2>
+
+<p>Out of the box, the Loki chart installs <strong>simple scalable</strong> mode: separate read, write and backend Pods.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/get-started/deployment-modes/">[7]</a></sup> The chart's own values say that mode requires object storage, such as S3. That is the right shape for a team's production logs, and far too much for kind on a laptop.</p>
+
+<p><strong>Monolithic</strong> mode "runs all of Loki's microservice components inside a single process as a single binary".<sup class="cite"><a href="https://grafana.com/docs/loki/latest/get-started/deployment-modes/">[7]</a></sup> Your <code>values-loki.yaml</code> switches to it and keeps the chunks on the Pod's own volume:</p>
+
+<div class="filename">examples/s3/values-loki.yaml</div>
+<pre class="file"># Loki in single-binary mode with filesystem storage: one Pod, no object store.
+deploymentMode: SingleBinary
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+singleBinary:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+# Turn off the scalable components and the extras this lesson does not need.
+read: { replicas: 0 }
+write: { replicas: 0 }
+backend: { replicas: 0 }
+gateway: { enabled: false }
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+lokiCanary: { enabled: false }
+test: { enabled: false }</pre>
+
+<p><code>auth_enabled: false</code> means one tenant, no login: fine inside your own cluster. The <code>schemaConfig</code> says how Loki lays out its index on disk; copy it as it is.</p>
+
+<h2>LogQL: labels first, then text</h2>
+
+<p>A LogQL query starts with a <strong>stream selector</strong> in braces. It is mandatory.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/query/">[8]</a></sup> After it comes an optional pipeline of stages, each starting with <code>|</code>. It is the same mental model as PromQL: select by labels first, then work on what you selected. LogQL is in fact based on PromQL.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/query/">[8]</a></sup></p>
+
+<table>
+  <thead><tr><th>Query</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>{namespace="default", app="hello"}</code></td><td>Stream selector: every line from streams with these labels. Uses the index.</td></tr>
+    <tr><td><code>{app="hello"} |= "boom"</code></td><td>Line filter: keep lines that contain the text, "a distributed grep".<sup class="cite"><a href="https://grafana.com/docs/loki/latest/query/log_queries/">[9]</a></sup></td></tr>
+    <tr><td><code>{app="hello"} | json | level="ERROR"</code></td><td>Parser: <code>json</code> turns every JSON field into a label, at query time. Then filter on it.</td></tr>
+    <tr><td><code>sum by (status) (count_over_time({app="hello"} | json [5m]))</code></td><td>Metric query: count lines per stream over 5 minutes, sum by status. Logs become numbers.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/query/metric_queries/">[10]</a></sup></td></tr>
+  </tbody>
+</table>
+
+<p>Order matters for speed. Put line filters early: every later stage then runs only on the lines that survived.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/query/log_queries/">[9]</a></sup></p>
+
+<p><strong>Cardinality bites here too.</strong> In lesson 05 you labelled metrics by route, never by raw URL. Loki has the same rule: every new combination of label values is a new stream, so labels should have few values, "ideally limited to tens", and an ID such as a request ID or trace ID must never become a label.<sup class="cite"><a href="https://grafana.com/docs/loki/latest/get-started/labels/bp-labels/">[11]</a></sup> Look up one request with a line filter instead: <code>{app="hello"} |= "the-id"</code>. The <code>pod</code> label is normal: it changes only when a Pod is replaced, so its values stay few. Fields that <code>| json</code> extracts at query time are not stored as labels, so a raw <code>path</code> inside the line is harmless.</p>
+
+<h2>Do it</h2>
+
+<h3>Structured logs from hello</h3>
+
+<ol class="steps">
+<li>
+  <p>Change <code>main.go</code> as below (it is <code>examples/s3/hello-0.3.0/main.go</code> in the course repository). Three changes: import <code>log/slog</code> instead of <code>log</code>, set a JSON handler as the default logger, and log one line per request in <code>instrument</code>.</p>
+  <div class="filename">main.go (changes since 0.2.0)</div>
+<pre class="file">@@ import
+-	"log"
++	"log/slog"
+@@ func instrument
+ 		next.ServeHTTP(rec, r)
++		level := slog.LevelInfo
++		if rec.status &gt;= 500 {
++			level = slog.LevelError
++		}
++		slog.Log(r.Context(), level, "request",
++			"method", r.Method, "path", r.URL.Path, "status", rec.status,
++			"duration_ms", time.Since(start).Milliseconds())
+ 		requests.WithLabelValues(r.Pattern, strconv.Itoa(rec.status)).Inc()
+@@ func main
+ func main() {
++	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+ 	port := os.Getenv("PORT")
+@@ end of main
+-	log.Printf("listening on :%s", port)
+-	log.Fatal(http.ListenAndServe(":"+port, instrument(mux)))
++	slog.Info("listening", "port", port)
++	if err := http.ListenAndServe(":"+port, instrument(mux)); err != nil {
++		slog.Error("server stopped", "err", err)
++		os.Exit(1)
++	}</pre>
+  <p class="note"><code>slog</code> has no <code>Fatal</code>, so the last lines log the error and exit by hand. <code>log/slog</code> is in the standard library: no <code>go get</code>, and <code>go.mod</code> and the Dockerfile stay as they are.</p>
+</li>
+
+<li>
+  <p>Build, load, and point the Deployment at the new tag. In <code>k8s/deployment.yaml</code>, change <code>image: hello:0.2.0</code> to <code>image: hello:0.3.0</code>.</p>
+<pre class="cmd">docker build -t hello:0.3.0 .</pre>
+<pre class="cmd">kind load docker-image hello:0.3.0</pre>
+<pre class="cmd">kubectl apply -f k8s/</pre>
+<pre class="cmd">kubectl rollout status deployment/hello</pre>
+</li>
+
+<li>
+  <p>Make some traffic and read it. In one terminal, the tunnel; in a second, the loop from lesson 05. Leave both running for the rest of the lesson.</p>
+<pre class="cmd">kubectl port-forward svc/hello 8080:80</pre>
+<pre class="cmd">while true; do curl -s -o /dev/null localhost:8080/; curl -s -o /dev/null localhost:8080/boom; sleep 0.2; done</pre>
+  <p>In a third terminal:</p>
+<pre class="cmd">kubectl logs deploy/hello --tail=3</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>Found 2 pods, using pod/hello-9c5c5cb84-tmknd
+{"time":"2026-11-19T09:36:15.307613286Z","level":"ERROR","msg":"request","method":"GET","path":"/boom","status":500,"duration_ms":0}
+{"time":"2026-11-19T09:36:15.507477853Z","level":"ERROR","msg":"request","method":"GET","path":"/boom","status":500,"duration_ms":0}
+{"time":"2026-11-19T09:36:15.536552947Z","level":"INFO","msg":"request","method":"GET","path":"/","status":200,"duration_ms":0}</pre>
+  </details>
+  <p>One JSON object per line. Note the first line: <code>kubectl logs</code> picked <em>one</em> of two Pods. You will also see <code>"path":"/metrics"</code> lines every 15 seconds: that is Prometheus scraping. Fine, and easy to filter out.</p>
+</li>
+</ol>
+
+<h3>Install Loki and Alloy</h3>
+
+<ol class="steps" start="4">
+<li>
+  <p>Copy the two values files into your <code>monitoring/</code> folder (adjust <code>../kubernetes-and-devops</code> if your clone lives elsewhere). Add Grafana's chart repository. Then install Loki, pinned to the version this lesson was tested with.</p>
+<pre class="cmd">cp ../kubernetes-and-devops/examples/s3/values-loki.yaml ../kubernetes-and-devops/examples/s3/values-alloy.yaml monitoring/</pre>
+<pre class="cmd">helm repo add grafana https://grafana.github.io/helm-charts</pre>
+<pre class="cmd">helm repo update</pre>
+<pre class="cmd">helm upgrade --install loki grafana/loki --version 7.7.0 -n monitoring -f monitoring/values-loki.yaml --wait --timeout 10m</pre>
+<pre class="cmd">kubectl -n monitoring get pods,svc -l app.kubernetes.io/name=loki</pre>
+  <details class="expect"><summary>Expected output (trimmed; the install took 46 seconds here)</summary>
+<pre>NAME         READY   STATUS    RESTARTS   AGE
+pod/loki-0   2/2     Running   0          46s
+
+NAME                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
+service/loki              ClusterIP   10.96.225.101   &lt;none&gt;        3100/TCP,9095/TCP   46s
+service/loki-headless     ClusterIP   None            &lt;none&gt;        3100/TCP            46s
+service/loki-memberlist   ClusterIP   None            &lt;none&gt;        7946/TCP            46s</pre>
+  </details>
+  <p><code>loki-0</code>: the <code>-0</code> suffix is the StatefulSet's numbering, as with <code>prometheus-kps-prometheus-0</code>. The second container is a sidecar for alerting rules; you do not use it here. The Service <code>loki</code> on port 3100 is where Alloy pushes and Grafana queries.</p>
+</li>
+
+<li>
+  <p>Install Alloy.</p>
+<pre class="cmd">helm upgrade --install alloy grafana/alloy --version 1.16.0 -n monitoring -f monitoring/values-alloy.yaml --wait</pre>
+<pre class="cmd">kubectl -n monitoring get ds,pods -l app.kubernetes.io/name=alloy</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAME                   DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE
+daemonset.apps/alloy   1         1         1       1            1           &lt;none&gt;          39s
+
+NAME              READY   STATUS    RESTARTS   AGE
+pod/alloy-9xqbf   2/2     Running   0          39s</pre>
+  </details>
+  <p>A DaemonSet: <code>DESIRED 1</code> because kind has one node. Add a node and it would say 2, with no change from you. The second container is <code>config-reloader</code>: it watches the mounted config and tells Alloy to reload when it changes.</p>
+  <p class="note">Check <code>kubectl -n monitoring logs ds/alloy -c alloy --tail=5</code> if anything looks wrong. A healthy start ends with <code>msg="config reloaded"</code> and <code>msg="scheduling loaded components and services"</code>.</p>
+</li>
+
+<li>
+  <p>Tell Grafana where Loki is. Add these lines under <code>grafana:</code> in your <code>monitoring/values-kps.yaml</code>, keeping what is there:</p>
+  <div class="filename">monitoring/values-kps.yaml (the grafana: part)</div>
+<pre class="file">grafana:
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring:3100
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }</pre>
+  <p>Then the same command as in lesson 03, with the edited file:</p>
+<pre class="cmd">helm upgrade kps prometheus-community/kube-prometheus-stack --version 93.4.1 -n monitoring -f monitoring/values-kps.yaml --wait</pre>
+<pre class="cmd">helm -n monitoring list</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAME 	NAMESPACE 	REVISION	STATUS  	CHART                       	APP VERSION
+alloy	monitoring	1       	deployed	alloy-1.16.0                	v1.22.0
+kps  	monitoring	2       	deployed	kube-prometheus-stack-93.4.1	v0.95.2
+loki 	monitoring	1       	deployed	loki-7.7.0                  	3.6.20</pre>
+  </details>
+  <p><code>kps</code> is now on revision 2. Re-open your Grafana port-forward (the Grafana Pod was replaced) and log in again:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-grafana 3000:80</pre>
+  <p>In <a href="http://localhost:3000/">Grafana</a>, open <strong>Connections → Data sources</strong>. You see Alertmanager, Loki and Prometheus. Click <strong>Loki</strong>, scroll down, <strong>Save &amp; test</strong>: "Data source successfully connected."</p>
+</li>
+
+<li>
+  <p>Stop and think: which pattern was that? You changed a values file, ran <code>helm upgrade</code>, and a Pod restarted or reloaded. Compare with the two ways of adding a scrape target in <a href="s3-04-config-file-vs-operator.html">lesson 04</a>. Answer before you open the box.</p>
+  <details class="expect"><summary>Our answer</summary>
+  <p>The <strong>config-file pattern</strong>, with Helm doing the tedious part. Loki's and Alloy's settings end up in plain ConfigMaps (<code>loki</code>, <code>alloy</code>); no operator watches a custom resource for them. Helm renders the new ConfigMap and applies it. Then something has to notice: Alloy's <code>config-reloader</code> sidecar calls Alloy's reload endpoint, much like the <code>/-/reload</code> you ran by hand in lesson 04. Loki's Pod template carries a <code>checksum/config</code> annotation, so a changed config changes the template and the StatefulSet replaces the Pod. A typo still only shows up when the program reads its file, as in lesson 04.</p>
+  <p>The operator style exists for logs too: the Alloy chart installed a CRD, <code>podlogs.monitoring.grafana.com</code> (see <code>kubectl get crd | grep grafana</code>), read by Alloy's <code>loki.source.podlogs</code> component,<sup class="cite"><a href="https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.podlogs/">[12]</a></sup> and Grafana publishes an <code>alloy-operator</code> chart that manages Alloy itself from a custom resource. This course does not use either; you now know what to look for.</p>
+  </details>
+</li>
+</ol>
+
+<h3>Query your logs</h3>
+
+<ol class="steps" start="8">
+<li>
+  <p>In Grafana, open <strong>Explore</strong>, pick the <strong>Loki</strong> data source and switch the query editor to <strong>Code</strong>. Run each query; look at the lines and at the labels Grafana shows under a line when you click it.</p>
+<pre>{namespace="default", app="hello"}</pre>
+  <details class="expect"><summary>Expected output (one line of many)</summary>
+<pre>{"time":"...","level":"INFO","msg":"request","method":"GET","path":"/","status":200,"duration_ms":0}</pre>
+  </details>
+<pre>{app="hello"} |= "boom"</pre>
+  <details class="expect"><summary>Expected output (one line of many)</summary>
+<pre>{"time":"...","level":"ERROR","msg":"request","method":"GET","path":"/boom","status":500,"duration_ms":0}</pre>
+  </details>
+<pre>{app="hello"} | json | level="ERROR"</pre>
+  <details class="expect"><summary>Expected output (the labels of one result line)</summary>
+<pre>app=hello  container=hello  detected_level=error  duration_ms=0
+instance=default/hello-9c5c5cb84-tmknd:hello  job=loki.source.kubernetes.pods
+level=ERROR  method=GET  msg=request  namespace=default  path=/boom
+pod=hello-9c5c5cb84-tmknd  service_name=hello  status=500  time=2026-11-19T09:38:24.559228716Z</pre>
+  </details>
+  <p>After <code>| json</code>, every JSON field is a label you can filter on: <code>level</code>, <code>path</code>, <code>status</code>. A few labels you did not write come from Alloy and Loki themselves: <code>instance</code>, <code>job</code>, <code>service_name</code>, <code>detected_level</code>.</p>
+<pre>sum by (status) (count_over_time({app="hello"} | json [5m]))</pre>
+  <details class="expect"><summary>Expected output (your numbers differ)</summary>
+<pre>{}             2
+{status="200"} 186
+{status="500"} 182</pre>
+  </details>
+  <p>Roughly half the requests fail, as the loop intends. The <code>{}</code> series, with no <code>status</code>: those are the two <code>"msg":"listening"</code> lines, one per Pod, which have no status field.</p>
+</li>
+
+<li>
+  <p>Find a stream that is not there. Your podinfo release from lesson 01 still runs. Try:</p>
+<pre>{app="demo-podinfo"}</pre>
+  <p>No data. podinfo's Pods are labelled <code>app.kubernetes.io/name=demo-podinfo</code>, not <code>app</code>, and your relabel rule only copies <code>app</code>. Select it by labels that every Pod has instead:</p>
+<pre>{namespace="default", pod=~"demo-podinfo.*"}</pre>
+  <p>Lines appear. Lesson: when a query is empty, check which labels the stream really has before you blame Alloy. In Explore, the <strong>Label browser</strong> lists them.</p>
+</li>
+</ol>
+
+<h3>From symptom to cause</h3>
+
+<ol class="steps" start="10">
+<li>
+  <p>Your loop has been sending half of the requests to <code>/boom</code> for a few minutes. Look at the symptom first. In the Prometheus UI (<code>kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090</code>), open <strong>Alerts</strong>: <code>HelloHighErrorRate</code> from lesson 05 is <code>firing</code> (it was <code>pending</code> for its <code>for: 2m</code> first). Your dashboard panel from lesson 05 shows the error ratio near 0.5.</p>
+</li>
+
+<li>
+  <p>Now the cause, in one window. In Grafana <strong>Explore</strong>:</p>
+  <ol>
+    <li>Pick <strong>Prometheus</strong> and run the error ratio from lesson 05: <code>sum(rate(http_requests_total{job="hello", status=~"5.."}[1m])) / sum(rate(http_requests_total{job="hello"}[1m]))</code>.</li>
+    <li>Click <strong>Split</strong>. A second pane opens next to the first.</li>
+    <li>In the right pane, pick <strong>Loki</strong> and run <code>{app="hello"} | json | level="ERROR"</code>. Link the two time pickers with the sync button, so both panes always show the same time range.<sup class="cite"><a href="https://grafana.com/docs/grafana/latest/explore/get-started-with-explore/">[13]</a></sup></li>
+  </ol>
+  <p>Left: the ratio jumps. Right: the lines from the same minutes, every one saying <code>"path":"/boom","status":500</code>. Drag across the spike in the left graph to zoom: the right pane follows. Stop the loop with <kbd>Ctrl</kbd>+<kbd>C</kbd> and watch both sides calm down.</p>
+  <p><strong>From symptom to cause in three clicks: that is what observability is.</strong> The metric tells you when and how bad; the log tells you which request and why. The shared labels (<code>app</code>, <code>namespace</code>, <code>pod</code>) are what make the jump easy, which is why Alloy copies the same Kubernetes metadata Prometheus uses.</p>
+</li>
+
+<li>
+  <p>Commit your work.</p>
+<pre class="cmd">git add main.go k8s/ monitoring/</pre>
+<pre class="cmd">git commit -m "JSON logs, Loki and Alloy, Loki data source in Grafana"</pre>
+<pre class="cmd">git push</pre>
+</li>
+</ol>
+
+<h2>If you meet Promtail</h2>
+
+<p>Before Alloy, the usual Loki agent was <strong>Promtail</strong>. It reached end of life on 2 March 2026 and is no longer maintained.<sup class="cite"><a href="https://grafana.com/docs/alloy/latest/set-up/migrate/from-promtail/">[14]</a></sup><sup class="cite"><a href="https://community.grafana.com/t/promtail-end-of-life-eol-march-2026-how-to-migrate-to-grafana-alloy-for-existing-loki-server-deployments/159636">[15]</a></sup> You will still find it in clusters you inherit. Alloy can translate its config for you: <code>alloy convert --source-format=promtail</code>. Try it with a tiny Promtail config, using the <code>alloy</code> binary inside your Alloy Pod:</p>
+
+<div class="filename">promtail.yaml</div>
+<pre class="file">clients:
+  - url: http://loki.monitoring:3100/loki/api/v1/push
+scrape_configs:
+  - job_name: pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod</pre>
+<pre class="cmd">kubectl -n monitoring exec -i ds/alloy -c alloy -- alloy convert --source-format=promtail -o /dev/stdout /dev/stdin &lt; promtail.yaml</pre>
+<details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>discovery.kubernetes "pods" {
+	role = "pod"
+
+	selectors {
+		role  = "pod"
+		field = "spec.nodeName=" + coalesce(sys.env("HOSTNAME"), constants.hostname)
+	}
+}
+
+discovery.relabel "pods" {
+	targets = discovery.kubernetes.pods.targets
+	...
+}
+
+loki.source.file "pods" {
+	targets    = discovery.relabel.pods.output
+	forward_to = [loki.write.default.receiver]
+	...
+}
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki.monitoring:3100/loki/api/v1/push"
+	}
+	external_labels = {}
+}</pre>
+</details>
+
+<p>Almost your config. One difference: the converted config uses <code>loki.source.file</code>, which reads the log files under <code>/var/log/pods</code> on the node, the way Promtail did. Yours uses <code>loki.source.kubernetes</code>, which reads through the Kubernetes API. Both are valid. Reading files needs the node's log folder mounted into the Alloy Pod; reading through the API needs no node access but costs more network traffic and kubelet CPU.<sup class="cite"><a href="https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/">[6]</a></sup></p>
+
+<h2>Clean up</h2>
+
+<p>This is the last hands-on lesson of session 3. When you are done exploring, remove the releases, then the cluster.</p>
+
+<pre class="cmd">helm uninstall demo</pre>
+<pre class="cmd">helm -n monitoring uninstall kps loki alloy</pre>
+<pre class="cmd">kubectl get crd</pre>
+<details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>release "demo" uninstalled
+release "kps" uninstalled
+release "loki" uninstalled
+release "alloy" uninstalled
+NAME                                        SCOPE        VERSIONS            CREATED AT
+alertmanagerconfigs.monitoring.coreos.com   Namespaced   v1alpha1(storage)   ...
+...
+podlogs.monitoring.grafana.com              Namespaced   v1alpha2(storage)   ...
+...
+servicemonitors.monitoring.coreos.com       Namespaced   v1(storage)         ...</pre>
+</details>
+
+<p>The releases are gone, the CRDs are not. That is on purpose: Helm does not upgrade or delete CRDs, "due to the danger for unintentional data loss".<sup class="cite"><a href="https://helm.sh/docs/chart_best_practices/custom_resource_definitions/">[16]</a></sup> Deleting a CRD deletes every custom resource of that type, everybody's ServiceMonitors included, so Helm leaves that decision to you. On your own kind cluster, just delete the whole cluster:</p>
+
+<pre class="cmd">kind delete cluster</pre>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>What does Loki put in its index?</legend>
+  <button class="opt" data-why="No. That is a full-text index, the expensive kind Loki avoids.">Every word of every line, like a search engine</button>
+  <button class="opt" data-why="No. JSON fields become labels only at query time, with | json. They are not indexed.">Every JSON field that your server writes into lines</button>
+  <button class="opt" data-why="Right. Loki indexes the label set of each stream. The lines are stored as compressed chunks and read only when needed.">Only the labels of each stream, not the text</button>
+  <button class="opt" data-why="No. The label index is what lets Loki skip most chunks. Without it every query would read everything.">Nothing at all, because it scans every chunk instead</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Predict the output</span>A rollout replaced both <code>hello</code> Pods an hour ago. You want the old Pods' error lines. Where do you find them?</legend>
+  <button class="opt" data-why="Right. Alloy shipped them while the Pods lived. Loki keeps them independent of the Pods.">In Loki, selecting the old Pod name by pod label</button>
+  <button class="opt" data-why="No. The old Pods are deleted, and their logs went with them. kubectl logs answers NotFound.">With kubectl logs and the old Pod name you remember</button>
+  <button class="opt" data-why="No. --previous shows the last run of a container in a Pod that still exists. These Pods are gone.">With kubectl logs --previous on one of the new Pods</button>
+  <button class="opt" data-why="No. Prometheus stores numbers, not log lines. It can tell you that errors happened, not what they said.">In Prometheus, because it scraped the old Pods every 15s</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Alloy runs as a DaemonSet with the field selector <code>spec.nodeName=</code> + <code>HOSTNAME</code>. What does the selector do?</legend>
+  <button class="opt" data-why="No. HOSTNAME is set to the node's name by the chart, and the selector filters Pods by it. Nothing is renamed.">It renames each Pod after its node's own name</button>
+  <button class="opt" data-why="No. Where Alloy itself runs is decided by the DaemonSet: one Pod per node. The selector filters what it collects.">It keeps Alloy from running on the control-plane node</button>
+  <button class="opt" data-why="No. The opposite. Without it, every Alloy would ship every Pod's logs, so each line would arrive once per node.">It makes every Alloy collect logs of all Pods</button>
+  <button class="opt" data-why="Right. Each Alloy takes only its own node's Pods, so no line is shipped twice and the API server has less to send.">Each Alloy only collects Pods on its own node</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span><code>sum by (status) (count_over_time({app="hello"} | json [5m]))</code> returns <code>{status="200"}</code>, <code>{status="500"}</code> and a third series, <code>{}</code>, with value 2. What is <code>{}</code>?</legend>
+  <button class="opt" data-why="No. A parse failure would add an __error__ label, not an empty set. Every hello line is valid JSON.">Lines Loki could not parse as JSON at all</button>
+  <button class="opt" data-why="Right. The two startup lines, one per Pod, are valid JSON but have no status field, so they group under no status.">The two listening lines, which carry no status field</button>
+  <button class="opt" data-why="No. Prometheus scrapes are logged as requests with status 200, so they count under status 200.">Prometheus scrapes of /metrics, which are never counted here</button>
+  <button class="opt" data-why="No. Requests with a status always carry it. Only lines without the field land in {}.">Requests that timed out before they got any status</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>You add a request ID to every log line and want to find one request fast. What do you do?</legend>
+  <button class="opt" data-why="Right. Narrow down by labels, then grep the lines. Keep IDs in the text, never in labels.">Keep it in the line and use a line filter</button>
+  <button class="opt" data-why="No. A label with a new value per request makes a new stream per request. Loki's docs name exactly this as the mistake.">Make the request ID a label in the Alloy config</button>
+  <button class="opt" data-why="No. A metric label with unbounded values is the cardinality problem from lesson 05, now in Prometheus.">Add the request ID as a new label on http_requests_total</button>
+  <button class="opt" data-why="No. Loki has no full-text index; that is the design. A line filter is how you search text.">Ask Loki to build a full-text index on that field</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>You change Alloy's config in <code>values-alloy.yaml</code> and run <code>helm upgrade</code>. Which pattern from lesson 04 is this?</legend>
+  <button class="opt" data-why="No. No operator runs for Alloy in this cluster. Helm wrote the ConfigMap once and stopped.">The operator way: a controller reconciles a custom resource</button>
+  <button class="opt" data-why="No. The ServiceMonitor gotcha is about Prometheus selecting CRs. Alloy reads a plain config file.">The ServiceMonitor way, so the release: kps label matters</button>
+  <button class="opt" data-why="Right. A plain ConfigMap changes, and a sidecar triggers a reload. No operator and no custom resource are involved.">The config-file way: a new ConfigMap, then a reload</button>
+  <button class="opt" data-why="No. Neither: the ConfigMap is real, and something has to reload the program after it changes.">Neither, because Helm edits the running Alloy process directly</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Predict the output</span>podinfo's Pods carry <code>app.kubernetes.io/name=demo-podinfo</code> and no <code>app</code> label. With your Alloy config, what does <code>{app="demo-podinfo"}</code> return?</legend>
+  <button class="opt" data-why="No. Alloy does not guess. The relabel rule reads the Pod label named exactly app.">podinfo's lines, since Alloy maps the label to app</button>
+  <button class="opt" data-why="No. Selecting by a label value that no stream has is valid LogQL. It just matches nothing.">A parse error, since that label value is unknown</button>
+  <button class="opt" data-why="No. A stream selector is an exact match. It never falls back to other streams.">Every Pod's lines in the cluster, since nothing matched</button>
+  <button class="opt" data-why="Right. No stream has app=demo-podinfo. Select by namespace and a pod regex instead.">No data, because no stream carries that app label</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>In Explore you type only <code>|= "boom"</code>, with no braces in front. What happens?</legend>
+  <button class="opt" data-why="No. Loki never searches everything by default. That would read every chunk it has.">Loki searches every stream it has for the word</button>
+  <button class="opt" data-why="Right. The stream selector is mandatory. Loki answers: parse error ... syntax error: unexpected |=.">A parse error, because a stream selector is required</button>
+  <button class="opt" data-why="No. Grafana does not fill in a selector for you in Code mode.">Grafana adds your last selector in front for you</button>
+  <button class="opt" data-why="No. You get an error, not an empty result. The query is not valid LogQL.">An empty result, because no line matches the filter</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://grafana.com/docs/loki/latest/get-started/labels/bp-labels/">Grafana Loki: Label best practices</a> (about ten minutes). It explains streams and cardinality with real numbers, and why a request ID belongs in the line and not in a label.
+</div>
+
+<p class="ask">No logs in Explore, or a data source that will not connect? Ask your instructor with the output of <code>kubectl -n monitoring get pods</code> and <code>kubectl -n monitoring logs ds/alloy -c alloy --tail=20</code>.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://kubernetes.io/docs/concepts/cluster-administration/logging/">Kubernetes: Logging Architecture</a> ·
+[2] <a href="https://pkg.go.dev/log/slog">Go: package log/slog</a> ·
+[3] <a href="https://grafana.com/docs/loki/latest/get-started/overview/">Grafana Loki: Overview</a> ·
+[4] <a href="https://grafana.com/docs/alloy/latest/get-started/components/">Grafana Alloy: Components</a> ·
+[5] <a href="https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.kubernetes/">Grafana Alloy: discovery.kubernetes</a> ·
+[6] <a href="https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/">Grafana Alloy: loki.source.kubernetes</a> ·
+[7] <a href="https://grafana.com/docs/loki/latest/get-started/deployment-modes/">Grafana Loki: Deployment modes</a> ·
+[8] <a href="https://grafana.com/docs/loki/latest/query/">Grafana Loki: Query (LogQL)</a> ·
+[9] <a href="https://grafana.com/docs/loki/latest/query/log_queries/">Grafana Loki: Log queries</a> ·
+[10] <a href="https://grafana.com/docs/loki/latest/query/metric_queries/">Grafana Loki: Metric queries</a> ·
+[11] <a href="https://grafana.com/docs/loki/latest/get-started/labels/bp-labels/">Grafana Loki: Label best practices</a> ·
+[12] <a href="https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.podlogs/">Grafana Alloy: loki.source.podlogs</a> ·
+[13] <a href="https://grafana.com/docs/grafana/latest/explore/get-started-with-explore/">Grafana: Get started with Explore</a> ·
+[14] <a href="https://grafana.com/docs/alloy/latest/set-up/migrate/from-promtail/">Grafana Alloy: Migrate from Promtail</a> ·
+[15] <a href="https://community.grafana.com/t/promtail-end-of-life-eol-march-2026-how-to-migrate-to-grafana-alloy-for-existing-loki-server-deployments/159636">Grafana Community: Promtail end of life announcement</a> ·
+[16] <a href="https://helm.sh/docs/chart_best_practices/custom_resource_definitions/">Helm: Custom Resource Definitions</a>.
+Commands verified 2026-11-19 on kind v0.33.0, kubectl 1.37.1, Helm v4.3.0, Loki chart 7.7.0, Alloy chart 1.16.0 (macOS).</p>
+
+<nav class="pager"><a href="s3-05-instrument-and-alert.html">← previous: instrument and alert</a><a href="s3-07-recap-quiz.html">next: session 3 recap quiz →</a></nav>
+
+</main>
+</body>
+</html>

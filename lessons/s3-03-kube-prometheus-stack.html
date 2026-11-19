@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kube-prometheus-stack</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Observability · about 25 minutes · after the session</p>
+<h1>Install kube-prometheus-stack and meet its parts</h1>
+
+<div class="win">
+  <strong>Your win:</strong> the metrics stack runs on your kind cluster from one committed values file, and you can name every Pod in it. You can also say which parts Helm made and which parts the operator made.
+</div>
+
+<p class="meta">Before this: you installed and removed a small chart with Helm in <a href="s3-01-helm-consumer.html">lesson 01</a>, and you know what a CRD and a control loop are from <a href="s3-02-operator-pattern.html">lesson 02</a>. Your kind cluster is running, and your Docker VM has at least 6&nbsp;GB of memory. The example files are in the course repository, in <code>examples/s3/</code>, after a <code>git pull</code>.</p>
+
+<h2>What's in the box</h2>
+
+<p><strong>kube-prometheus-stack</strong> is one Helm chart that installs a whole monitoring system: the Prometheus Operator, Prometheus, Alertmanager, and by default also Grafana, kube-state-metrics and node-exporter.<sup class="cite"><a href="https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack">[1]</a></sup> The operator is the heart of it. It "provides Kubernetes native deployment and management of Prometheus and related monitoring components".<sup class="cite"><a href="https://prometheus-operator.dev/docs/getting-started/introduction/">[2]</a></sup></p>
+
+<table>
+  <thead><tr><th>Component</th><th>Runs as</th><th>Job</th><th>In our values</th></tr></thead>
+  <tbody>
+    <tr><td>Prometheus Operator</td><td>Deployment <code>kps-operator</code></td><td>Watches the monitoring CRs. Writes Prometheus and Alertmanager config. Runs their StatefulSets.</td><td>on</td></tr>
+    <tr><td>Prometheus</td><td>StatefulSet, made <em>by the operator</em> from a <code>Prometheus</code> CR</td><td>Scrapes targets, stores time series, evaluates alert rules.</td><td>on</td></tr>
+    <tr><td>Alertmanager</td><td>StatefulSet, made by the operator from an <code>Alertmanager</code> CR</td><td>Groups, silences and routes the alerts Prometheus sends.</td><td>on</td></tr>
+    <tr><td>Grafana</td><td>Deployment <code>kps-grafana</code> (plain Helm, no operator)</td><td>The UI: dashboards and Explore.</td><td>on</td></tr>
+    <tr><td>config-reloader</td><td>sidecar container in the Prometheus and Alertmanager Pods</td><td>Notices that the generated config changed and tells the server to reload it.</td><td>on</td></tr>
+    <tr><td>Grafana sidecars</td><td>two sidecar containers in the Grafana Pod</td><td>Watch for ConfigMaps that hold dashboards and datasources, and load them into Grafana.</td><td>on</td></tr>
+    <tr><td>kube-state-metrics</td><td>Deployment</td><td>Turns Kubernetes object state (replicas, restarts) into metrics.</td><td><strong>off</strong></td></tr>
+    <tr><td>node-exporter</td><td>DaemonSet, one Pod per node</td><td>Node CPU, memory and disk as metrics.</td><td><strong>off</strong></td></tr>
+  </tbody>
+</table>
+
+<p>Why turn two parts off? <strong>Memory.</strong> Your whole cluster is one Docker container on your laptop, and today you only need metrics from your own apps. In a real cluster you keep both on: without them you have no node dashboards and no metrics about Deployments and Pods.</p>
+
+<h2>The values file, line by line</h2>
+
+<p>The chart has hundreds of default values. You override only the ones that matter, in one file you commit. It is short enough to read in full:</p>
+
+<p class="filename">examples/s3/values-kps.yaml</p>
+<pre class="file"># Slim kube-prometheus-stack for a laptop kind cluster.
+fullnameOverride: kps
+kubeStateMetrics:
+  enabled: false
+nodeExporter:
+  enabled: false
+# kind does not expose these control-plane endpoints; their targets would show as down.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+      limits: { memory: 1Gi }
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+grafana:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }</pre>
+
+<ul>
+  <li><code>fullnameOverride: kps</code>: short object names (<code>kps-operator</code>, <code>kps-grafana</code>). Without it, every name starts with <code>kps-kube-prometheus-stack-</code>.</li>
+  <li><code>kubeStateMetrics</code>, <code>nodeExporter</code>: off, to save memory (see above).</li>
+  <li><code>kubeEtcd</code> … <code>kubeProxy</code>: the chart would scrape these control-plane parts, but kind does not expose their metrics ports. You would only get four red "down" targets.</li>
+  <li><code>prometheus.prometheusSpec</code>: goes, almost word for word, into the <code>spec</code> of the <code>Prometheus</code> custom resource. <code>retention: 6h</code> deletes data older than six hours, so the disk stays small. The <code>resources</code> are the requests and limits you met in session 1.</li>
+  <li><code>alertmanager.alertmanagerSpec</code>, <code>grafana.resources</code>: the same idea for the other two servers.</li>
+</ul>
+
+<p class="warn"><strong>Memory and wifi.</strong> This stack plus a small app used about 1.9&nbsp;GiB inside the kind node when we measured it. Give your Docker VM at least 6&nbsp;GB. The first install pulls about eight images, so do it at home on good wifi, not on the venue network.</p>
+
+<h2>Two layers: Helm, then the operator</h2>
+
+<p>Here is the surprise of this lesson. Helm does <em>not</em> create the Prometheus server. Helm creates a <code>Prometheus</code> <strong>custom resource</strong>: an object of a new kind that the chart taught the API server through a CRD.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/">[3]</a></sup> The operator watches that object and deploys a StatefulSet for it.<sup class="cite"><a href="https://prometheus-operator.dev/docs/getting-started/design/">[4]</a></sup> It also writes Prometheus's whole configuration into a Secret, generated from the <code>ServiceMonitor</code> and <code>PrometheusRule</code> objects it finds.</p>
+
+<pre>INSTALL TIME: Helm, runs once                RUN TIME: the operator, loops forever
+
+values-kps.yaml ─┐
+chart templates ─┴─► helm ─► Prometheus CR ─────watch──► kps-operator (a Pod)
+                       │     ServiceMonitors ───watch──►      │
+                       │     Deployments: operator,           │ creates and keeps fixing
+                       │       grafana                        ▼
+                       │     ConfigMaps, Services   StatefulSet prometheus-kps-prometheus
+                       ▼                            Secret prometheus-kps-prometheus
+                     exits                            (the generated prometheus.yaml)</pre>
+
+<p>So the two layers have different jobs. <strong>Helm</strong> runs when <em>you</em> run it: it renders templates, sends the objects, and exits. <strong>The operator</strong> runs all the time: whenever a CR changes, it changes the real things to match. Change <code>retention</code> in your values file and run <code>helm upgrade</code>: Helm updates the CR, and the operator updates the StatefulSet. Add a <code>ServiceMonitor</code> with plain <code>kubectl apply</code>: Helm is not involved at all, and the operator still picks it up. That second path is the next lesson.</p>
+
+<h2>Do it</h2>
+
+<ol class="steps">
+<li>
+  <p>Work in your own <code>hello</code> repository. Make a <code>monitoring/</code> folder and copy the values file into it from the course repository. The command assumes you cloned <code>kubernetes-and-devops</code> next to your <code>hello</code> repository; adjust <code>../kubernetes-and-devops</code> if yours lives elsewhere, and run <code>git pull</code> in it first.</p>
+<pre class="cmd">mkdir -p monitoring</pre>
+<pre class="cmd">cp ../kubernetes-and-devops/examples/s3/values-kps.yaml monitoring/</pre>
+</li>
+
+<li>
+  <p>Add the chart repository, then install. Pin the chart version, as in lesson 01: the same command must give the same stack next month.<sup class="cite"><a href="https://helm.sh/docs/helm/helm_upgrade/">[5]</a></sup></p>
+<pre class="cmd">helm repo add prometheus-community https://prometheus-community.github.io/helm-charts</pre>
+<pre class="cmd">helm repo update</pre>
+<pre class="cmd">helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 93.4.1 \
+  -n monitoring --create-namespace -f monitoring/values-kps.yaml --wait --timeout 10m</pre>
+  <p>It took 72 seconds on our Mac with the images already pulled. The first time, expect several minutes. <code>--wait</code> returns only when everything is ready.</p>
+<pre class="cmd">helm -n monitoring list</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAME  NAMESPACE   REVISION  ...  STATUS    CHART                         APP VERSION
+kps   monitoring  1         ...  deployed  kube-prometheus-stack-93.4.1  v0.95.2</pre>
+  </details>
+</li>
+
+<li>
+  <p>Name every Pod.</p>
+<pre class="cmd">kubectl -n monitoring get pods</pre>
+  <details class="expect"><summary>Expected output (your hashes differ)</summary>
+<pre>NAME                              READY   STATUS    RESTARTS   AGE
+alertmanager-kps-alertmanager-0   2/2     Running   0          15s
+kps-grafana-6c58789c7-vb7d5       3/3     Running   0          16s
+kps-operator-7988b8464d-hs4gx     1/1     Running   0          16s
+prometheus-kps-prometheus-0       2/2     Running   0          15s</pre>
+  </details>
+  <p>Read the <code>READY</code> column: it counts <em>containers</em>, so these Pods have sidecars. Prometheus and Alertmanager are 2/2: the server plus its <code>config-reloader</code>. Grafana is 3/3: Grafana plus two sidecars, <code>grafana-sc-dashboard</code> and <code>grafana-sc-datasources</code>. List them yourself:</p>
+<pre class="cmd">kubectl -n monitoring get pod prometheus-kps-prometheus-0 -o jsonpath='{.spec.containers[*].name}'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>prometheus config-reloader</pre>
+  </details>
+  <p>The <code>-0</code> at the end is the StatefulSet's numbering: a StatefulSet's Pods get stable names, not random hashes.</p>
+</li>
+
+<li>
+  <p><strong>The API server grew new nouns.</strong> In lesson 02 a fresh kind cluster had no CRDs at all. Now:</p>
+<pre class="cmd">kubectl get crd | grep monitoring.coreos.com</pre>
+  <details class="expect"><summary>Expected output (dates trimmed)</summary>
+<pre>alertmanagerconfigs.monitoring.coreos.com   Namespaced   v1alpha1(storage)
+alertmanagers.monitoring.coreos.com         Namespaced   v1(storage)
+podmonitors.monitoring.coreos.com           Namespaced   v1(storage)
+probes.monitoring.coreos.com                Namespaced   v1(storage)
+prometheusagents.monitoring.coreos.com      Namespaced   v1alpha1(storage)
+prometheuses.monitoring.coreos.com          Namespaced   v1(storage)
+prometheusrules.monitoring.coreos.com       Namespaced   v1(storage)
+scrapeconfigs.monitoring.coreos.com         Namespaced   v1alpha1(storage)
+servicemonitors.monitoring.coreos.com       Namespaced   v1(storage)
+thanosrulers.monitoring.coreos.com          Namespaced   v1(storage)</pre>
+  </details>
+  <p>Ten new kinds of object. <code>kubectl get</code>, <code>describe</code> and <code>explain</code> work on all of them, exactly as on Pods.</p>
+</li>
+
+<li>
+  <p><strong>The key reveal.</strong> Ask for the Prometheus server as an object:</p>
+<pre class="cmd">kubectl -n monitoring get prometheus,alertmanager</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>NAME                                              VERSION              DESIRED   READY   RECONCILED   AVAILABLE   AGE
+prometheus.monitoring.coreos.com/kps-prometheus   v3.16.0-distroless   1         1       True         True        68s
+
+NAME                                                  VERSION   REPLICAS   READY   RECONCILED   AVAILABLE   AGE
+alertmanager.monitoring.coreos.com/kps-alertmanager   v0.35.0   1          1       True         True        68s</pre>
+  </details>
+  <p>The Prometheus server <em>is</em> a custom resource. <code>RECONCILED True</code> is the operator reporting that reality matches the spec. Now check who made what. First, the kinds Helm sent:</p>
+<pre class="cmd">helm -n monitoring get manifest kps | grep -E '^kind: (Deployment|StatefulSet|Prometheus|Alertmanager)$' | sort | uniq -c</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>   1 kind: Alertmanager
+   2 kind: Deployment
+   1 kind: Prometheus</pre>
+  </details>
+  <p>No StatefulSet at all. Yet there are two:</p>
+<pre class="cmd">kubectl -n monitoring get deploy,statefulset</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>deployment.apps/kps-grafana    1/1
+deployment.apps/kps-operator   1/1
+statefulset.apps/alertmanager-kps-alertmanager   1/1
+statefulset.apps/prometheus-kps-prometheus       1/1</pre>
+  </details>
+<pre class="cmd">kubectl -n monitoring get statefulset prometheus-kps-prometheus -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>Prometheus/kps-prometheus</pre>
+  </details>
+  <p>The StatefulSet's owner is the <code>Prometheus</code> CR, not a Helm release. The operator made it. That is the two-layer picture above, seen from your terminal.</p>
+</li>
+
+<li>
+  <p>Meet the CR you will write yourself in the next lesson, the <strong>ServiceMonitor</strong>. It says "scrape the Services with these labels, on this port". The schema came with the CRD, so <code>explain</code> works:</p>
+<pre class="cmd">kubectl explain servicemonitor.spec</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>GROUP:      monitoring.coreos.com
+KIND:       ServiceMonitor
+VERSION:    v1
+
+FIELD: spec &lt;Object&gt;
+
+DESCRIPTION:
+    spec defines the specification of desired Service selection for target
+    discovery by
+    Prometheus.
+
+FIELDS:
+  attachMetadata	&lt;Object&gt;
+  ...
+  endpoints	&lt;[]Object&gt; -required-
+  ...</pre>
+  </details>
+  <p>The chart already ships some, one per component it monitors, plus about 30 <code>PrometheusRule</code> objects full of ready-made alerts:</p>
+<pre class="cmd">kubectl get servicemonitor,prometheusrule -A</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAMESPACE    NAME
+monitoring   servicemonitor.monitoring.coreos.com/kps-alertmanager
+monitoring   servicemonitor.monitoring.coreos.com/kps-apiserver
+monitoring   servicemonitor.monitoring.coreos.com/kps-coredns
+monitoring   servicemonitor.monitoring.coreos.com/kps-grafana
+monitoring   servicemonitor.monitoring.coreos.com/kps-kubelet
+monitoring   servicemonitor.monitoring.coreos.com/kps-operator
+monitoring   servicemonitor.monitoring.coreos.com/kps-prometheus
+
+NAMESPACE    NAME
+monitoring   prometheusrule.monitoring.coreos.com/kps-alertmanager.rules
+monitoring   prometheusrule.monitoring.coreos.com/kps-config-reloaders
+monitoring   prometheusrule.monitoring.coreos.com/kps-general.rules
+...</pre>
+  </details>
+</li>
+
+<li>
+  <p>Which ServiceMonitors does this Prometheus actually read? Not all of them. Its CR has a selector:</p>
+<pre class="cmd">kubectl -n monitoring get prometheus kps-prometheus -o jsonpath='{.spec.serviceMonitorSelector}'</pre>
+  <details class="expect"><summary>Expected output</summary>
+<pre>{"matchLabels":{"release":"kps"}}</pre>
+  </details>
+  <p>Only ServiceMonitors labelled <code>release: kps</code> count; the chart sets that up by default.<sup class="cite"><a href="https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack">[1]</a></sup> Remember this line. In the next lesson it will cost you a few confused minutes, on purpose.</p>
+</li>
+
+<li>
+  <p>Open the Prometheus UI. Port-forward in a second terminal and leave it running:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090</pre>
+  <p>Browse to <a href="http://localhost:9090">http://localhost:9090</a>, then <strong>Status → Target health</strong>. Every pool is named after the ServiceMonitor that produced it: <code>serviceMonitor/&lt;namespace&gt;/&lt;name&gt;/&lt;endpoint&gt;</code>.</p>
+  <p>The same list from the command line, if you have <code>jq</code> (optional): one line per pool, with the number of targets in front.</p>
+<pre class="cmd">curl -s localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | "\(.scrapePool) \(.health)"' | sort | uniq -c</pre>
+  <details class="expect"><summary>Expected output (all up)</summary>
+<pre>   1 serviceMonitor/monitoring/kps-alertmanager/0 up
+   1 serviceMonitor/monitoring/kps-alertmanager/1 up
+   1 serviceMonitor/monitoring/kps-apiserver/0 up
+   2 serviceMonitor/monitoring/kps-coredns/0 up
+   1 serviceMonitor/monitoring/kps-grafana/0 up
+   2 serviceMonitor/monitoring/kps-kubelet/0 up
+   2 serviceMonitor/monitoring/kps-kubelet/1 up
+   2 serviceMonitor/monitoring/kps-kubelet/2 up
+   1 serviceMonitor/monitoring/kps-operator/0 up
+   1 serviceMonitor/monitoring/kps-prometheus/0 up
+   1 serviceMonitor/monitoring/kps-prometheus/1 up</pre>
+  </details>
+  <p>Look at <code>kps-coredns</code>: one ServiceMonitor, <em>two</em> targets, because CoreDNS runs two Pods. Keep that in mind for the next lesson.</p>
+</li>
+
+<li>
+  <p>Open Grafana. Its admin password is random and lives in a <strong>Secret</strong>. Read it from there:</p>
+<pre class="cmd">kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo</pre>
+  <p>That prints 40 random characters. The user name is <code>admin</code>. This is how secrets look in practice: stored in the cluster, read when needed, never typed into a file you commit. Note that <code>base64</code> is an encoding, not encryption: anyone who may read Secrets in this namespace may read the password.<sup class="cite"><a href="https://kubernetes.io/docs/concepts/configuration/secret/">[6]</a></sup></p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-grafana 3000:80</pre>
+  <p>Log in at <a href="http://localhost:3000">http://localhost:3000</a> and open <strong>Dashboards</strong>. Nobody clicked those dashboards together. Each one is a ConfigMap with the label <code>grafana_dashboard=1</code>:</p>
+<pre class="cmd">kubectl -n monitoring get cm -l grafana_dashboard=1</pre>
+  <details class="expect"><summary>Expected output (trimmed)</summary>
+<pre>NAME                                    DATA   AGE
+kps-alertmanager-overview               1      14m
+kps-apiserver                           1      14m
+kps-cluster-total                       1      14m
+kps-grafana-overview                    1      14m
+kps-k8s-coredns                         1      14m
+...</pre>
+  </details>
+  <p>The <code>grafana-sc-dashboard</code> sidecar watches for such ConfigMaps and loads them into Grafana. It is another small watch loop, the same idea as the operator in miniature.</p>
+</li>
+
+<li>
+  <p>Open Alertmanager:</p>
+<pre class="cmd">kubectl -n monitoring port-forward svc/kps-alertmanager 9093:9093</pre>
+  <p>At <a href="http://localhost:9093">http://localhost:9093</a> one alert is already firing: <code>Watchdog</code>. Nothing is broken. It fires all the time on purpose, as a dead man's switch: "this alert is always firing, therefore it should always be firing in Alertmanager".<sup class="cite"><a href="https://runbooks.prometheus-operator.dev/runbooks/general/watchdog/">[7]</a></sup> If it ever <em>stops</em>, your alerting pipeline is broken.</p>
+</li>
+
+<li>
+  <p>Commit the values file. It is the whole description of your stack: anyone can rebuild it with the one command from step 2.</p>
+<pre class="cmd">git add monitoring/values-kps.yaml</pre>
+<pre class="cmd">git commit -m "Add kube-prometheus-stack values"</pre>
+  <p class="note">Leave the stack running. The next lesson uses it. If you need the memory back, <code>helm -n monitoring uninstall kps</code> removes it, but the ten CRDs stay: Helm does not delete CRDs, so the chart's README tells you to remove them by hand.<sup class="cite"><a href="https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack">[1]</a></sup></p>
+</li>
+</ol>
+
+<h2>Check yourself</h2>
+<p class="meta">Answer from memory first. Wrong picks explain themselves; keep going until you hit the right one.</p>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Predict the output</span><code>kubectl -n monitoring get pods</code> shows <code>prometheus-kps-prometheus-0   2/2   Running</code>. What does <code>2/2</code> mean?</legend>
+  <button class="opt" data-why="No. A StatefulSet with two replicas shows two Pods, -0 and -1. READY counts inside one Pod.">Two Prometheus replicas are running and both are ready</button>
+  <button class="opt" data-why="No. RESTARTS counts restarts. READY counts containers that are ready.">The Prometheus container has restarted two times since install</button>
+  <button class="opt" data-why="Right. The Pod holds prometheus and config-reloader, and both are ready.">Two containers, Prometheus plus its config-reloader, are both ready</button>
+  <button class="opt" data-why="No. Scrape targets are not shown by kubectl at all. You see them in the Prometheus UI.">Prometheus found two scrape targets, both of them up</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Who created the StatefulSet <code>prometheus-kps-prometheus</code>?</legend>
+  <button class="opt" data-why="Right. helm get manifest has no StatefulSet. Its ownerReference is the Prometheus CR.">The operator, from the Prometheus custom resource</button>
+  <button class="opt" data-why="No. The rendered manifest contains a Prometheus CR, but no StatefulSet.">Helm, rendered straight from the chart's templates</button>
+  <button class="opt" data-why="No. The Deployment controller makes ReplicaSets, never StatefulSets.">The Deployment controller, from the kps-operator Deployment</button>
+  <button class="opt" data-why="No. The config-reloader only tells the running server to reload. It creates no objects.">The config-reloader sidecar, during the first start</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>You set <code>retention: 12h</code> in your values file and run <code>helm upgrade</code>. What happens, in order?</legend>
+  <button class="opt" data-why="No. Helm never touches the StatefulSet, because it is not in the chart's output.">Helm edits the StatefulSet directly, then Kubernetes restarts the Pod</button>
+  <button class="opt" data-why="No. Retention is a flag the operator sets on the Pod. Nobody edits a file by hand.">You edit prometheus.yml by hand, then you reload Prometheus manually</button>
+  <button class="opt" data-why="No. Values only matter when Helm renders them. The operator never reads your values file.">The operator reads your values file, then updates the StatefulSet</button>
+  <button class="opt" data-why="Right. Two layers: Helm changes the desired state, the operator makes reality match it.">Helm updates the CR, then the operator updates the StatefulSet</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Predict the output</span>You run <code>helm -n monitoring uninstall kps</code>, then <code>kubectl get crd | grep monitoring.coreos.com</code>. What do you see?</legend>
+  <button class="opt" data-why="No. Helm does not delete CRDs, because deleting a CRD deletes every object of that kind.">Nothing, because uninstall removed every CRD it had installed</button>
+  <button class="opt" data-why="Right. The CRDs stay until you delete them by hand. The README lists the commands.">All ten CRDs, because Helm leaves CRDs in place</button>
+  <button class="opt" data-why="No. There is no such split. Helm either deletes CRDs or it does not, and it does not.">Only the CRDs that still have objects in them</button>
+  <button class="opt" data-why="No. Without the CRDs the grep simply finds nothing. kubectl does not error.">An error, because the API server is still reloading</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind">Concept</span>Why are node-exporter and kube-state-metrics off in <code>values-kps.yaml</code>?</legend>
+  <button class="opt" data-why="Right. They are useful in real clusters. Here they cost memory you need for the lessons.">To save memory on a laptop kind cluster</button>
+  <button class="opt" data-why="No. Both work on kind. We turn them off for memory, not because they fail.">Because kind cannot run DaemonSets or any exporters</button>
+  <button class="opt" data-why="No. Prometheus does not need them to start. They are just more targets.">Because Prometheus refuses to start while they run</button>
+  <button class="opt" data-why="No. Both are part of the default chart. Turning them off is our choice.">Because the chart's license forbids them in teaching</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind">Concept</span>The <code>Watchdog</code> alert is firing in Alertmanager. What should you do?</legend>
+  <button class="opt" data-why="No. Silencing it removes the one signal that proves alerting works end to end.">Silence it so the alert list stays clean</button>
+  <button class="opt" data-why="No. Nothing is down. The alert has no condition that can ever be false.">Find the broken component and restart its Pod</button>
+  <button class="opt" data-why="Right. It always fires by design. If it ever stops arriving, alerting itself is broken.">Nothing: it always fires to prove alerting works</button>
+  <button class="opt" data-why="No. More memory changes nothing. The alert fires on every healthy stack.">Raise Prometheus's memory limit and then wait longer</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind">Concept</span>Where should Grafana's admin password live?</legend>
+  <button class="opt" data-why="No. Your repo is public. Anything committed there is readable by everyone, forever, in the history.">In values-kps.yaml, committed to git next to the other settings</button>
+  <button class="opt" data-why="No. A ConfigMap is for non-secret settings, and dashboards. Secrets have their own kind.">In a ConfigMap labelled grafana_dashboard so the sidecar loads it</button>
+  <button class="opt" data-why="No. Shell history is a plain-text file, exactly where secrets must not go.">In your shell history, typed once with the login command</button>
+  <button class="opt" data-why="Right. The chart generated it into a Secret. You read it when you need it.">In a Kubernetes Secret, read with kubectl only when needed</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind">Concept</span>How did the ready-made dashboards get into Grafana?</legend>
+  <button class="opt" data-why="No. Grafana has no built-in Kubernetes dashboards. They come from the chart.">Grafana downloads them from the internet on first start</button>
+  <button class="opt" data-why="Right. ConfigMaps labelled grafana_dashboard=1 are watched and loaded by a sidecar.">A sidecar container loads ConfigMaps labelled grafana_dashboard into Grafana</button>
+  <button class="opt" data-why="No. The operator manages Prometheus and Alertmanager. Grafana is plain Helm.">The Prometheus Operator writes them straight into Grafana's database</button>
+  <button class="opt" data-why="No. Nobody clicked anything. That is the point of shipping them as ConfigMaps.">The chart author clicked them together in your Grafana</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Go further</h2>
+
+<div class="source">
+  <strong>Read next:</strong> <a href="https://prometheus-operator.dev/docs/getting-started/design/">Prometheus Operator: Design</a>. It describes every custom resource you just listed, what the operator builds from each, and how the selectors connect them. About ten minutes.
+</div>
+
+<p class="ask">A Pod stuck in <code>Pending</code> or <code>ContainerCreating</code>, or a target that stays red? Ask your instructor, with the output of <code>kubectl -n monitoring get pods</code> and <code>kubectl -n monitoring describe pod &lt;name&gt;</code>.</p>
+
+<p class="meta">Sources:
+[1] <a href="https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack">prometheus-community: kube-prometheus-stack chart README</a> ·
+[2] <a href="https://prometheus-operator.dev/docs/getting-started/introduction/">Prometheus Operator: Introduction</a> ·
+[3] <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/">Kubernetes: Custom Resources</a> ·
+[4] <a href="https://prometheus-operator.dev/docs/getting-started/design/">Prometheus Operator: Design</a> ·
+[5] <a href="https://helm.sh/docs/helm/helm_upgrade/">Helm: helm upgrade</a> ·
+[6] <a href="https://kubernetes.io/docs/concepts/configuration/secret/">Kubernetes: Secrets</a> ·
+[7] <a href="https://runbooks.prometheus-operator.dev/runbooks/general/watchdog/">Prometheus Operator runbooks: Watchdog</a>.
+Commands verified 2026-11-19 on kind v0.33.0, kubectl 1.37.1, Helm v4.3.0, kube-prometheus-stack 93.4.1 (macOS).</p>
+
+<nav class="pager"><a href="s3-02-operator-pattern.html">← previous: the operator pattern</a><a href="s3-04-config-file-vs-operator.html">next: config file vs. operator →</a></nav>
+
+</main>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # From Code to Cluster (Kubernetes and DevOps) Resources
 
-Scope so far: Session 1 (containerization → Docker → GHCR → kind → Kubernetes first contact). Links verified 2026-10-05.
+Scope so far: Session 1 (containerization → Docker → GHCR → kind → Kubernetes first contact), links verified 2026-10-05; Session 3 (Helm, operators, metrics, logs), links verified 2026-11-19.
 Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desktop v1.24.0, OCI image-spec v1.1.1.
 
 ## Knowledge
@@ -127,6 +127,42 @@ Versions at that date: Kubernetes v1.37.1, kind v0.33.0, Go 1.27.1, Rancher Desk
 - [Docs: Pod lifecycle, termination (Kubernetes)](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination). Use for: SIGTERM, grace period, SIGKILL.
 - [Article: The Twelve-Factor App, Config](https://12factor.net/config). Use for: why the port comes from an environment variable.
 - [Site: Retrieval Practice (Agarwal & Bain)](https://www.retrievalpractice.org/). Use for: why the recap quiz is spaced.
+
+### Session 3: Helm (as a consumer)
+
+- [Docs: Using Helm (Helm)](https://helm.sh/docs/intro/using_helm/)
+  Chart, release, repository; install, upgrade, rollback, values files. **Recommended read** for s3-01.
+- [Docs: Installing Helm](https://helm.sh/docs/intro/install/) and [helm upgrade reference](https://helm.sh/docs/helm/helm_upgrade/)
+  Use for: install steps, `upgrade --install`, `--dry-run=client`. Helm v4.3.0 at verification.
+- [Docs: Custom Resource Definitions best practices (Helm)](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/)
+  CRDs in `crds/` are never deleted by `helm uninstall`. Use for: the clean-up box.
+
+### Session 3: Operators
+
+- [Docs: Operator pattern (Kubernetes)](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
+  Operators as controllers for custom resources. **Recommended read** for s3-02.
+- [Docs: Controllers](https://kubernetes.io/docs/concepts/architecture/controller/) and [Custom Resources](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/) (Kubernetes)
+  The control loop; CRD vs custom resource. Use for: s3-02 and s3-04.
+- [Docs: Prometheus Operator design](https://prometheus-operator.dev/docs/getting-started/design/) and [getting started](https://prometheus-operator.dev/docs/developer/getting-started/)
+  Prometheus, ServiceMonitor, PrometheusRule CRDs; `serviceMonitorSelector`. Use for: s3-03, s3-04.
+- [Repo: kube-prometheus-stack chart (prometheus-community)](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
+  Version 93.4.1 (operator v0.95.2, Prometheus v3.16.0, Grafana 13.3.1) at verification.
+
+### Session 3: Metrics
+
+- [Docs: Instrumentation best practices](https://prometheus.io/docs/practices/instrumentation/), [Metric types](https://prometheus.io/docs/concepts/metric_types/), [Naming](https://prometheus.io/docs/practices/naming/), [Histograms](https://prometheus.io/docs/practices/histograms/) (Prometheus)
+  Counter vs histogram, `_total`/`_seconds`, label cardinality, `histogram_quantile`. Use for: s3-05.
+- [Docs: Configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/) and [Alerting rules](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/) (Prometheus)
+  `scrape_configs`, `/-/reload` with `--web.enable-lifecycle`, `for:`. Use for: s3-04 part A, s3-05.
+- [Article: The RED method (Grafana Labs)](https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/)
+  Rate, Errors, Duration. Use for: framing the dashboard.
+
+### Session 3: Logs
+
+- [Docs: Loki overview](https://grafana.com/docs/loki/latest/get-started/overview/), [deployment modes](https://grafana.com/docs/loki/latest/get-started/deployment-modes/), [label best practices](https://grafana.com/docs/loki/latest/get-started/labels/bp-labels/), [LogQL](https://grafana.com/docs/loki/latest/query/) (Grafana)
+  Labels-only index, single-binary mode, LogQL. Loki chart 7.7.0 at verification.
+- [Docs: Alloy components](https://grafana.com/docs/alloy/latest/get-started/components/), [loki.source.kubernetes](https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/), [Migrate from Promtail](https://grafana.com/docs/alloy/latest/set-up/migrate/from-promtail/) (Grafana)
+  Alloy chart 1.16.0 (Alloy v1.22.0) at verification. Promtail is end of life since 2 March 2026.
 
 ## Wisdom (Communities)
 

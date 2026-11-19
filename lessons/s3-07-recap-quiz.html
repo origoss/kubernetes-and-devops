@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session 3 Recap</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="../assets/lesson.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="crumbs">Session 3 · Review · about 12 minutes · before session 4</p>
+<h1>Session 3, from memory</h1>
+
+<div class="win">
+  <strong>Your win:</strong> proof that session 3 stuck, and that sessions 1 and 2 did not fade. You'll also know exactly which lessons to reread before session 4.
+</div>
+
+<p class="meta">Do this a few days after session 3, not right after it. Recalling something you have half-forgotten is what makes it stick, so the effort is the point.<sup class="cite"><a href="https://www.retrievalpractice.org/">[1]</a></sup> No notes, no terminal. The questions are mixed on purpose, and a few come from earlier sessions.</p>
+
+<h2>Sixteen questions</h2>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s3-04-config-file-vs-operator.html">Lesson 04</a> · Predict the output</span>You apply a ServiceMonitor for podinfo but forget the <code>release: kps</code> label. What happens?</legend>
+  <button class="opt" data-why="No. The API only checks the schema. A missing label is perfectly valid.">kubectl apply refuses it, saying the release label is missing</button>
+  <button class="opt" data-why="Right. The Prometheus CR selects ServiceMonitors with release: kps. Yours is stored but ignored, and nothing complains.">It is created, but no target appears and nothing complains</button>
+  <button class="opt" data-why="No. The operator does not guess. It only picks ServiceMonitors that match the selector.">The operator adds the label for you, then scrapes it</button>
+  <button class="opt" data-why="No. The selector filters ServiceMonitors silently. There is no error or Event for ones it skips.">Prometheus shows the target as down with a label error</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s3-01-helm-consumer.html">Lesson 01</a> · Predict the output</span>You install release <code>demo</code>, upgrade it once, then run <code>helm rollback demo 1</code>. How many rows does <code>helm history demo</code> show?</legend>
+  <button class="opt" data-why="No. A rollback does not erase history. Revision 2 stays as a superseded row.">One, because rollback deletes every revision after the first</button>
+  <button class="opt" data-why="No. Helm does not rename revision 1. It writes a new revision with the old values.">Two, because revision 1 is simply marked deployed again</button>
+  <button class="opt" data-why="No. Helm records one revision per install, upgrade and rollback, nothing more.">Four, because rollback writes an undo and redo revision</button>
+  <button class="opt" data-why="Right. Revision 3 says Rollback to 1. Rollback moves forward in history, with old values.">Three, because the rollback itself becomes a new revision</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s1-07-pod-deployment-service.html">Session 1, lesson 07</a> · Predict the output</span>The file says <code>replicas: 2</code>. You run <code>kubectl scale deployment hello --replicas=4</code>, then <code>kubectl apply -f k8s/</code>. How many Pods run?</legend>
+  <button class="opt" data-why="Right. apply makes the cluster match the file. The operator in session 3 does the same with its CRs, all the time.">Two, because apply puts the cluster back to the file</button>
+  <button class="opt" data-why="No. scale changed the cluster, not your file on disk.">Four, because scale also wrote the number to the file</button>
+  <button class="opt" data-why="No. apply sets values from the file. It never adds them up.">Six, because apply adds the two from the file again</button>
+  <button class="opt" data-why="No. apply does not know what you meant. It just compares with the file.">Four, because apply keeps changes that you made by command</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s3-06-logs-loki-alloy.html">Lesson 06</a> · Concept</span>Why is Loki cheaper to run than a full-text search engine?</legend>
+  <button class="opt" data-why="No. Loki keeps every line you send. It saves on the index, not by dropping logs.">It throws away most lines and keeps only the errors</button>
+  <button class="opt" data-why="No. Loki has no full-text index at all. That is the point.">It builds a full-text index, but only once a day</button>
+  <button class="opt" data-why="Right. A small label index plus compressed chunks. You narrow by labels, then filter the text.">It indexes only stream labels and compresses the log text</button>
+  <button class="opt" data-why="No. Loki stores log lines; Prometheus stores numbers. They are separate systems.">It stores the logs inside Prometheus as extra time series</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s3-02-operator-pattern.html">Lesson 02</a> · Concept</span>An operator was down while three ServiceMonitors changed. It starts again. Why does it still get everything right?</legend>
+  <button class="opt" data-why="No. The API server does not keep a queue of missed events for a controller.">The API server replays every event it missed, in order</button>
+  <button class="opt" data-why="Right. Level-triggered: each loop compares the whole desired state with the actual state, so missed events do not matter.">It compares desired and actual state, not the missed events</button>
+  <button class="opt" data-why="No. Nothing was waiting. The changes were stored in the API, and the operator reads that state.">Kubernetes paused all changes until the operator came back up</button>
+  <button class="opt" data-why="No. Operators do not need a backup. The desired state lives in the API, in etcd.">It reads a backup of events from its own disk</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s3-05-instrument-and-alert.html">Lesson 05</a> · Predict the output</span>Your middleware labels metrics by <code>r.Pattern</code>. You <code>curl localhost:8080/nope</code>. Which series goes up?</legend>
+  <button class="opt" data-why="No. The label is the route pattern, not the raw URL. That is the whole point.">A brand new series, http_requests_total with path=&quot;/nope&quot; and status 200</button>
+  <button class="opt" data-why="No. GET / is a catch-all, so /nope gets an answer, not a 404.">The series for path=&quot;GET /&quot; with status 404, not found</button>
+  <button class="opt" data-why="No. Every request goes through the middleware and is counted.">None, because unknown paths are never counted by the middleware</button>
+  <button class="opt" data-why="Right. /nope matches the GET / pattern. Random URLs cannot create new series: cardinality stays small.">The already existing series for path=&quot;GET /&quot; with status 200</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s3-04-config-file-vs-operator.html">Lesson 04</a> · Predict the output</span>The Prometheus operator is scaled to 0. You apply a correct ServiceMonitor. A minute later?</legend>
+  <button class="opt" data-why="No. The API server stores it. It does not need the operator to accept a custom resource.">kubectl apply failed, because nobody handles that kind right now</button>
+  <button class="opt" data-why="No. Prometheus never reads ServiceMonitors. It only reads the config the operator writes.">Prometheus picked it up by itself and scrapes the target</button>
+  <button class="opt" data-why="Right. kubectl get servicemonitor shows it. The generated config has no job for it until the operator runs again.">It exists in the API, but Prometheus config is unchanged</button>
+  <button class="opt" data-why="No. Nothing deletes it. It waits in the API, and the operator handles it when it returns.">The ServiceMonitor was garbage collected, because no controller claimed it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s2-01-push-ghcr.html">Session 2, GHCR</a> · Predict the output</span>You pushed <code>ghcr.io/&lt;you&gt;/hello:0.1.0</code> and changed nothing on GitHub. A classmate, not logged in, pulls it. What happens?</legend>
+  <button class="opt" data-why="Right. A new package is private. Without a login GHCR says denied.">denied, because a new package on GHCR is private</button>
+  <button class="opt" data-why="No. New packages start private, not public.">The pull works, because every new package is public</button>
+  <button class="opt" data-why="No. docker pull never prompts. docker login is a separate command.">Docker asks the classmate for a GitHub password first</button>
+  <button class="opt" data-why="No. A registry serves the image or refuses. There are no placeholders.">An empty image downloads, with no layers inside it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s3-05-instrument-and-alert.html">Lesson 05</a> · Concept</span>What do the letters of RED stand for?</legend>
+  <button class="opt" data-why="Right. How many requests, how many fail, how long they take. Your three hello panels.">Rate, Errors, Duration</button>
+  <button class="opt" data-why="No. Those are about machines and storage, not about requests to your service.">Reads, Exports, Disks</button>
+  <button class="opt" data-why="No. Those are Kubernetes words. RED is about the requests your service handles.">Replicas, Events, Deployments</button>
+  <button class="opt" data-why="No. Those are failure events in a cluster, not signals about requests.">Restarts, Evictions, Downtime</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s3-06-logs-loki-alloy.html">Lesson 06</a> · Concept</span>Which LogQL query shows only the <code>ERROR</code> lines of <code>hello</code>'s JSON logs?</legend>
+  <button class="opt" data-why="No. A stream selector is mandatory. A query cannot start with a pipe."><code>| json | level=&quot;ERROR&quot;</code>, with no stream selector first</button>
+  <button class="opt" data-why="Right. Select the streams by label, parse the JSON, then filter on the new level label."><code>{app=&quot;hello&quot;} | json | level=&quot;ERROR&quot;</code>, parse first, then filter</button>
+  <button class="opt" data-why="No. level is not a stream label. It exists only after | json parses the line."><code>{app=&quot;hello&quot;, level=&quot;ERROR&quot;}</code> as one selector, with no parser stage</button>
+  <button class="opt" data-why="No. That is PromQL syntax, and Loki stores lines, not counters."><code>rate(http_requests_total{level=&quot;ERROR&quot;}[5m])</code> sent to the Loki data source in Explore</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="0">
+  <legend><span class="kind"><a href="s3-02-operator-pattern.html">Lesson 02</a> · Concept</span>How do a CRD and the ServiceMonitor named <code>hello</code> relate?</legend>
+  <button class="opt" data-why="Right. The CRD adds the ServiceMonitor kind to the API. hello is one custom resource of that kind, like a container from an image.">The CRD defines the kind, and hello is one object</button>
+  <button class="opt" data-why="No. One CRD serves every ServiceMonitor in the cluster.">Each ServiceMonitor needs its own CRD, installed by a chart</button>
+  <button class="opt" data-why="No. A CRD is pure API: a schema. The operator is the program that acts.">The CRD is the running program that watches over hello</button>
+  <button class="opt" data-why="No. They are different things: a kind, and an object of that kind.">They are just two names for exactly the same object</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s3-05-instrument-and-alert.html">Lesson 05</a> · Predict the output</span>Your rule says error ratio <code>&gt; 0.05</code> with <code>for: 2m</code>. The ratio has been above 0.05 for one minute. The alert's state?</legend>
+  <button class="opt" data-why="No. The condition is true, so the rule is no longer inactive.">inactive, because Prometheus has not evaluated the rule yet</button>
+  <button class="opt" data-why="No. firing comes only after the condition stayed true for the full two minutes.">firing, because the condition already became true straight away</button>
+  <button class="opt" data-why="Right. The condition holds but for: 2m has not passed. One more minute and it fires.">pending, because the for duration has not passed yet</button>
+  <button class="opt" data-why="No. Alertmanager only sees firing alerts. A pending alert is not sent.">resolved, because Alertmanager only groups alerts after two minutes</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="1">
+  <legend><span class="kind"><a href="s1-08-health-and-resources.html">Session 1, lesson 08</a> · Predict the output</span>One <code>hello</code> Pod's readiness probe starts failing. What do you see?</legend>
+  <button class="opt" data-why="No. That is what a failing liveness probe does. Readiness only decides traffic.">The kubelet restarts its container until the probe passes</button>
+  <button class="opt" data-why="Right. Running, not ready, and marked ready=false in the EndpointSlice, so the Service skips it.">Still Running, 0/1, and the Service stops sending traffic</button>
+  <button class="opt" data-why="No. Probes never delete Pods. The ReplicaSet keeps it.">The ReplicaSet deletes it and creates a fresh Pod</button>
+  <button class="opt" data-why="No. Readiness affects traffic, not scheduling. The Pod stays where it is.">It returns to Pending until some node accepts it</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s3-04-config-file-vs-operator.html">Lesson 04</a> · Concept</span>Which is a real cost of the operator way, compared with editing <code>prometheus.yml</code>?</legend>
+  <button class="opt" data-why="No. The API server checks a ServiceMonitor against its schema on apply. The plain file is checked only on reload.">Typos are caught later, only when Prometheus reloads its file</button>
+  <button class="opt" data-why="No. Each team ships its own small ServiceMonitor. The one shared file is the config-file way.">Every team has to edit the same one shared file</button>
+  <button class="opt" data-why="No. The operator and its config-reloader reload for you. You ran /-/reload by hand only in the plain setup.">You must trigger every reload by hand with a POST</button>
+  <button class="opt" data-why="Right. The operator must be running, and debugging has one more layer: CR, operator logs, generated config.">One more program must run, and debugging gains a layer</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="3">
+  <legend><span class="kind"><a href="s3-05-instrument-and-alert.html">Lesson 05</a> · Concept</span>Why do you wrap <code>http_requests_total</code> in <code>rate(...[1m])</code> before graphing it?</legend>
+  <button class="opt" data-why="No. rate does not filter labels. It computes the per-second increase.">rate drops the status label, so the graph stays readable</button>
+  <button class="opt" data-why="No. Prometheus stores the counter fine. rate is about meaning, not storage.">Prometheus cannot store a counter without rate applied to it</button>
+  <button class="opt" data-why="No. rate does not average Pods. sum does that, if you ask for it.">rate averages all Pods into one number for the panel</button>
+  <button class="opt" data-why="Right. The raw counter only climbs. rate turns it into requests per second, which is what changes when trouble starts.">A counter only goes up; rate gives requests per second</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<fieldset class="quiz-q" data-answer="2">
+  <legend><span class="kind"><a href="s3-06-logs-loki-alloy.html">Lesson 06</a> · Concept</span>Why does Alloy run as a DaemonSet?</legend>
+  <button class="opt" data-why="No. A DaemonSet has one Pod per node, not a fixed count. And Loki stores, Alloy collects.">So two copies of Loki keep each other in sync</button>
+  <button class="opt" data-why="No. Grafana queries Loki directly. Alloy only collects and pushes.">So Grafana can query each node's Alloy for its logs</button>
+  <button class="opt" data-why="Right. One collector per node, and the HOSTNAME field selector keeps each one to its own node's Pods.">So every node gets one collector for its own Pods</button>
+  <button class="opt" data-why="No. Its config is a plain ConfigMap. No operator watches it here.">So an operator can reconcile Alloy from a custom resource</button>
+  <div class="why" aria-live="polite"></div>
+</fieldset>
+
+<p class="quiz-score"></p>
+
+<h2>Now what?</h2>
+
+<p>For every question you missed on the first try, reread the lesson linked above it, then answer that question again tomorrow. Keep <a href="../reference/s3-cheat-sheet.html">the session 3 cheat sheet</a> at hand for the commands. Bring whatever is still unclear to session 4.</p>
+
+<p class="ask">Something still doesn't add up? Ask your instructor. A question asked before session 4 saves you an hour during it.</p>
+
+<p class="meta">Sources: [1] <a href="https://www.retrievalpractice.org/">Retrieval Practice (Agarwal &amp; Bain)</a>. Every answer here comes from the linked lesson, where it was verified.</p>
+
+<nav class="pager"><a href="s3-06-logs-loki-alloy.html">← logs with Loki and Alloy</a><span class="off">next: coming in session 4</span></nav>
+
+</main>
+</body>
+</html>
